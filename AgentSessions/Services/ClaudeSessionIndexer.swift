@@ -88,6 +88,11 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
     private var reloadingSessionIDs: Set<String> = []
     private let reloadLock = NSLock()
     private var lastFullReloadFileStatsBySessionID: [String: SessionFileStat] = [:]
+    /// Resume points for live sessions (guarded by reloadLock): a focused-session
+    /// monitor tick parses only the lines appended since, instead of re-parsing a
+    /// 70–200 MB log every few seconds. Bounded: only recently reloaded sessions.
+    private var parseCheckpointsBySessionID: [String: ClaudeSessionParser.Checkpoint] = [:]
+    private var parseCheckpointOrder: [String] = []
     private var lastPrewarmSignatureByID: [String: Int] = [:]
     private var lastKnownFileStatsByPath: [String: SessionFileStat] = [:]
     @Published private var filterEpoch: Int = 0
@@ -823,6 +828,43 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
 
     // Reload a specific session with full parse.
     // When force is true, reload even if events are already present.
+    private enum CheckpointedParse { case parsed(Session?), unchanged }
+
+    /// Appends to the session's checkpoint when it still matches the file, else
+    /// parses fully and stores a new checkpoint. Runs on the ingest queue. The
+    /// checkpoint alone rebuilds the whole session, so it also serves a session a
+    /// provider refresh put back to lightweight (`hasLoadedEvents` false), which
+    /// otherwise re-parsed the whole live log after every Claude index refresh.
+    private func parseWithCheckpoint(url: URL, id: String, allowAppend: Bool, hasLoadedEvents: Bool) -> CheckpointedParse {
+        reloadLock.lock()
+        let checkpoint = allowAppend ? parseCheckpointsBySessionID[id] : nil
+        reloadLock.unlock()
+        var result: (Session, ClaudeSessionParser.Checkpoint)?
+        if let checkpoint {
+            switch ClaudeSessionParser.parseFileAppend(at: url, forcedID: id, checkpoint: checkpoint) {
+            case .appended(let session, let next): result = (session, next)
+            case .unchanged:
+                if hasLoadedEvents { return .unchanged }
+                let size = Self.fileStat(for: url).map { Int($0.size) } ?? Int(checkpoint.byteOffset)
+                return .parsed(checkpoint.state.makeSession(forcedID: id, size: size))
+            case .fallbackToFullParse: break
+            }
+        }
+        if result == nil { result = ClaudeSessionParser.parseFileFullCheckpointed(at: url, forcedID: id) }
+        guard let (session, next) = result else {
+            return .parsed(ClaudeSessionParser.parseFileFull(at: url, forcedID: id))
+        }
+        reloadLock.lock()
+        parseCheckpointsBySessionID[id] = next
+        parseCheckpointOrder.removeAll { $0 == id }
+        parseCheckpointOrder.append(id)
+        while parseCheckpointOrder.count > 4 {
+            parseCheckpointsBySessionID.removeValue(forKey: parseCheckpointOrder.removeFirst())
+        }
+        reloadLock.unlock()
+        return .parsed(session)
+    }
+
     func reloadSession(id: String,
                        force: Bool = false,
                        reason: ReloadReason = .selection) {
@@ -891,7 +933,11 @@ final class ClaudeSessionIndexer: ObservableObject, @unchecked Sendable {
             }
 
             let startTime = Date()
-            let fullSession = ClaudeSessionParser.parseFileFull(at: url, forcedID: id)
+            let fullSession: Session?
+            switch self.parseWithCheckpoint(url: url, id: id, allowAppend: reason != .manualRefresh, hasLoadedEvents: hasLoadedEvents) {
+            case .parsed(let session): fullSession = session
+            case .unchanged: return
+            }
             let elapsed = Date().timeIntervalSince(startTime)
             #if DEBUG
             print("🔄 Reloading Claude session \(id.prefix(8)) force=\(force) reason=\(reason.rawValue) elapsed=\(String(format: "%.1f", elapsed))s events=\(fullSession?.events.count ?? 0)")

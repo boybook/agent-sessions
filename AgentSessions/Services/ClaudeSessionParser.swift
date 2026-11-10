@@ -35,148 +35,269 @@ final class ClaudeSessionParser {
         let attrs = (try? FileManager.default.attributesOfItem(atPath: url.path)) ?? [:]
         let size = (attrs[.size] as? NSNumber)?.intValue ?? -1
         let reader = JSONLReader(url: url)
-        var events: [SessionEvent] = []
-        var sessionID: String?
-        var model: String?
-        var llmModel: String?
-        var cwd: String?
-        var gitBranch: String?
-        var tmin: Date?
-        var tmax: Date?
-        var customTitle: String?
-        var aiTitle: String?
-        var hasExplicitCustomTitle = false
-        var entrypoint: String?
-        var keyedStopMarkers: [String: (position: Int, event: SessionEvent)] = [:]
-        var unkeyedStopMarkers: [(position: Int, event: SessionEvent)] = []
-        var idx = 0
-
-        // Detect subagent from file path
-        let (parentSessionID, subagentType) = Self.detectSubagentInfo(from: url)
-
+        var state = FullParseState(url: url)
         do {
-            try reader.forEachLine { rawLine in
-                idx += 1
-                // Request-log records are ~20% of the bytes of a 2.1.303+ session; skip the
-                // common written form before paying for a JSON decode.
-                if isRequestLogLinePrefix(rawLine) { return }
-                guard let data = rawLine.data(using: .utf8),
-                      let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                    return
-                }
-                // Fallback for a request-log record written in another key order.
-                if isRequestLogRecord(obj) { return }
-
-                // Extract session-level metadata from first few events
-                if sessionID == nil, let sid = obj["sessionId"] as? String {
-                    sessionID = sid
-                }
-                if cwd == nil {
-                    if let cwdVal = obj["cwd"] as? String, Self.isValidPath(cwdVal) {
-                        cwd = cwdVal
-                    } else if let projectVal = obj["project"] as? String, Self.isValidPath(projectVal) {
-                        cwd = projectVal
-                    }
-                }
-                if gitBranch == nil, let branch = obj["gitBranch"] as? String {
-                    gitBranch = branch
-                }
-                if model == nil, let ver = obj["version"] as? String {
-                    model = "Claude Code \(ver)"
-                }
-                if entrypoint == nil, let rawEntrypoint = obj["entrypoint"] as? String, !rawEntrypoint.isEmpty {
-                    entrypoint = rawEntrypoint
-                }
-                // Prefer actual LLM model from assistant events over CLI version
-                if llmModel == nil,
-                   let message = obj["message"] as? [String: Any],
-                   let msgModel = message["model"] as? String, !msgModel.isEmpty {
-                    llmModel = msgModel
-                }
-
-                // Extract timestamp
-                if let ts = extractTimestamp(from: obj) {
-                    if tmin == nil || ts < tmin! { tmin = ts }
-                    if tmax == nil || ts > tmax! { tmax = ts }
-                }
-
-                // Extract row titles. custom-title from /rename always wins;
-                // ai-title is a generated fallback; agent-name is weakest.
-                if let t = obj["type"] as? String {
-                    if t == "custom-title", let ct = obj["customTitle"] as? String, !ct.isEmpty {
-                        customTitle = ct
-                        hasExplicitCustomTitle = true
-                    } else if t == "ai-title", aiTitle == nil,
-                              let at = obj["aiTitle"] as? String, !at.isEmpty {
-                        aiTitle = at
-                    } else if t == "agent-name", !hasExplicitCustomTitle,
-                              aiTitle == nil,
-                              let an = obj["agentName"] as? String, !an.isEmpty {
-                        customTitle = an
-                    }
-                }
-
-                // Parse event
-                let baseID = eventID(for: url, index: idx)
-                let parsed = parseLineEvents(obj, baseEventID: baseID)
-                events.append(contentsOf: parsed)
-                if let marker = classifierStopMarker(obj, baseEventID: baseID) {
-                    // Tool results of parallel calls interleave with the reply's lines,
-                    // so the reply's last line is only known at end of file.
-                    if let apiMessageID = marker.apiMessageID {
-                        keyedStopMarkers[apiMessageID] = (events.count, marker.event)
-                    } else {
-                        unkeyedStopMarkers.append((events.count, marker.event))
-                    }
-                }
-            }
-            let stopMarkers = (Array(keyedStopMarkers.values) + unkeyedStopMarkers)
-                .sorted { $0.position > $1.position }
-            for marker in stopMarkers {
-                events.insert(marker.event, at: marker.position)
-            }
+            try reader.forEachLine { rawLine in state.consume(rawLine) }
         } catch {
             #if DEBUG
             print("❌ Failed to read Claude session: \(error)")
             #endif
             return nil
         }
+        return state.makeSession(forcedID: forcedID, size: size)
+    }
 
-        // Use per-file stable ID to match Sessions list expectations
-        let fileID = forcedID ?? hash(path: url.path)
-        let nonMetaCount = events.filter { $0.kind != .meta }.count
-        let isHousekeeping = Session.computeIsHousekeeping(source: .claude, events: events)
-        let sourceFallbackTitle = hasExplicitCustomTitle ? nil : (aiTitle ?? customTitle)
-        let explicitCustomTitle = hasExplicitCustomTitle ? customTitle : nil
-        func makeSession(lightweightTitle: String?) -> Session {
-            Session(
-                id: fileID,
-                source: .claude,
-                startTime: tmin,
-                endTime: tmax,
-                model: llmModel ?? model,
-                filePath: url.path,
-                fileSizeBytes: size >= 0 ? size : nil,
-                eventCount: nonMetaCount,
-                events: events,
-                cwd: cwd,
-                repoName: nil,
-                lightweightTitle: lightweightTitle,
-                isHousekeeping: isHousekeeping,
-                codexInternalSessionIDHint: sessionID,
-                parentSessionID: parentSessionID,
-                subagentType: subagentType,
-                customTitle: explicitCustomTitle,
-                originator: isClaudeDesktopEntrypoint(entrypoint) ? ClaudeDesktopSessionMetadataReader.desktopOriginator : nil,
-                originSource: isClaudeDesktopEntrypoint(entrypoint) ? "claude-desktop" : nil,
-                surface: isClaudeDesktopEntrypoint(entrypoint) ? .desktop : nil
-            )
+    /// The accumulators of a full parse. `parseFileFull` feeds every line; a
+    /// `Checkpoint` keeps the state after the last complete line so a growing
+    /// file continues from there (`parseFileAppend`) with the same result as a
+    /// full re-parse: stop markers are only placed at `makeSession`, as before.
+    struct FullParseState {
+        let url: URL
+        private let eventIDBase: String
+        fileprivate(set) var events: [SessionEvent] = []
+        private var sessionID: String?
+        private var model: String?
+        private var llmModel: String?
+        private var cwd: String?
+        private var gitBranch: String?
+        private var tmin: Date?
+        private var tmax: Date?
+        private var customTitle: String?
+        private var aiTitle: String?
+        private var hasExplicitCustomTitle = false
+        private var entrypoint: String?
+        private var keyedStopMarkers: [String: (position: Int, event: SessionEvent)] = [:]
+        private var unkeyedStopMarkers: [(position: Int, event: SessionEvent)] = []
+        fileprivate(set) var idx = 0
+
+        init(url: URL) {
+            self.url = url
+            self.eventIDBase = ClaudeSessionParser.hash(path: url.path)
         }
 
-        let titleProbe = makeSession(lightweightTitle: sourceFallbackTitle)
-        let lightweightTitle = sourceFallbackTitle ?? titleProbe.title
-        let session = makeSession(lightweightTitle: hasExplicitCustomTitle ? nil : lightweightTitle)
-        return enrichWithDesktopMetadataIfNeeded(session, url: url)
+        mutating func consume(_ rawLine: String) {
+            idx += 1
+            // Request-log records are ~20% of the bytes of a 2.1.303+ session; skip the
+            // common written form before paying for a JSON decode.
+            if ClaudeSessionParser.isRequestLogLinePrefix(rawLine) { return }
+            guard let data = rawLine.data(using: .utf8),
+                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                return
+            }
+            // Fallback for a request-log record written in another key order.
+            if ClaudeSessionParser.isRequestLogRecord(obj) { return }
+
+            // Extract session-level metadata from first few events
+            if sessionID == nil, let sid = obj["sessionId"] as? String {
+                sessionID = sid
+            }
+            if cwd == nil {
+                if let cwdVal = obj["cwd"] as? String, ClaudeSessionParser.isValidPath(cwdVal) {
+                    cwd = cwdVal
+                } else if let projectVal = obj["project"] as? String, ClaudeSessionParser.isValidPath(projectVal) {
+                    cwd = projectVal
+                }
+            }
+            if gitBranch == nil, let branch = obj["gitBranch"] as? String {
+                gitBranch = branch
+            }
+            if model == nil, let ver = obj["version"] as? String {
+                model = "Claude Code \(ver)"
+            }
+            if entrypoint == nil, let rawEntrypoint = obj["entrypoint"] as? String, !rawEntrypoint.isEmpty {
+                entrypoint = rawEntrypoint
+            }
+            // Prefer actual LLM model from assistant events over CLI version
+            if llmModel == nil,
+               let message = obj["message"] as? [String: Any],
+               let msgModel = message["model"] as? String, !msgModel.isEmpty {
+                llmModel = msgModel
+            }
+
+            // Extract timestamp
+            if let ts = ClaudeSessionParser.extractTimestamp(from: obj) {
+                if tmin == nil || ts < tmin! { tmin = ts }
+                if tmax == nil || ts > tmax! { tmax = ts }
+            }
+
+            // Extract row titles. custom-title from /rename always wins;
+            // ai-title is a generated fallback; agent-name is weakest.
+            if let t = obj["type"] as? String {
+                if t == "custom-title", let ct = obj["customTitle"] as? String, !ct.isEmpty {
+                    customTitle = ct
+                    hasExplicitCustomTitle = true
+                } else if t == "ai-title", aiTitle == nil,
+                          let at = obj["aiTitle"] as? String, !at.isEmpty {
+                    aiTitle = at
+                } else if t == "agent-name", !hasExplicitCustomTitle,
+                          aiTitle == nil,
+                          let an = obj["agentName"] as? String, !an.isEmpty {
+                    customTitle = an
+                }
+            }
+
+            // Parse event
+            let baseID = eventIDBase + String(format: "-%04d", idx)
+            let parsed = ClaudeSessionParser.parseLineEvents(obj, baseEventID: baseID)
+            events.append(contentsOf: parsed)
+            if let marker = ClaudeSessionParser.classifierStopMarker(obj, baseEventID: baseID) {
+                // Tool results of parallel calls interleave with the reply's lines,
+                // so the reply's last line is only known at end of file.
+                if let apiMessageID = marker.apiMessageID {
+                    keyedStopMarkers[apiMessageID] = (events.count, marker.event)
+                } else {
+                    unkeyedStopMarkers.append((events.count, marker.event))
+                }
+            }
+        }
+
+        func makeSession(forcedID: String?, size: Int) -> Session {
+            var events = self.events
+            let stopMarkers = (Array(keyedStopMarkers.values) + unkeyedStopMarkers)
+                .sorted { $0.position > $1.position }
+            for marker in stopMarkers {
+                events.insert(marker.event, at: marker.position)
+            }
+
+            // Detect subagent from file path
+            let (parentSessionID, subagentType) = ClaudeSessionParser.detectSubagentInfo(from: url)
+            // Use per-file stable ID to match Sessions list expectations
+            let fileID = forcedID ?? eventIDBase
+            let nonMetaCount = events.filter { $0.kind != .meta }.count
+            let isHousekeeping = Session.computeIsHousekeeping(source: .claude, events: events)
+            let sourceFallbackTitle = hasExplicitCustomTitle ? nil : (aiTitle ?? customTitle)
+            let explicitCustomTitle = hasExplicitCustomTitle ? customTitle : nil
+            let isDesktop = ClaudeSessionParser.isClaudeDesktopEntrypoint(entrypoint)
+            func makeSession(lightweightTitle: String?) -> Session {
+                Session(
+                    id: fileID,
+                    source: .claude,
+                    startTime: tmin,
+                    endTime: tmax,
+                    model: llmModel ?? model,
+                    filePath: url.path,
+                    fileSizeBytes: size >= 0 ? size : nil,
+                    eventCount: nonMetaCount,
+                    events: events,
+                    cwd: cwd,
+                    repoName: nil,
+                    lightweightTitle: lightweightTitle,
+                    isHousekeeping: isHousekeeping,
+                    codexInternalSessionIDHint: sessionID,
+                    parentSessionID: parentSessionID,
+                    subagentType: subagentType,
+                    customTitle: explicitCustomTitle,
+                    originator: isDesktop ? ClaudeDesktopSessionMetadataReader.desktopOriginator : nil,
+                    originSource: isDesktop ? "claude-desktop" : nil,
+                    surface: isDesktop ? .desktop : nil
+                )
+            }
+
+            let titleProbe = makeSession(lightweightTitle: sourceFallbackTitle)
+            let lightweightTitle = sourceFallbackTitle ?? titleProbe.title
+            let session = makeSession(lightweightTitle: hasExplicitCustomTitle ? nil : lightweightTitle)
+            return ClaudeSessionParser.enrichWithDesktopMetadataIfNeeded(session, url: url)
+        }
+    }
+
+    /// Parser state after the last complete line of one file (identified by
+    /// device + inode, since Claude only appends to a live session log).
+    struct Checkpoint {
+        let systemNumber: UInt64
+        let fileNumber: UInt64
+        let byteOffset: UInt64
+        let state: FullParseState
+    }
+
+    enum AppendResult {
+        case appended(Session, Checkpoint)
+        case unchanged
+        case fallbackToFullParse
+    }
+
+    private static func fileIdentity(_ url: URL) -> (system: UInt64, file: UInt64, size: UInt64)? {
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+              let system = (attrs[.systemNumber] as? NSNumber)?.uint64Value,
+              let file = (attrs[.systemFileNumber] as? NSNumber)?.uint64Value,
+              let size = (attrs[.size] as? NSNumber)?.uint64Value else { return nil }
+        return (system, file, size)
+    }
+
+    /// Full parse of the complete lines present now, returning a checkpoint to
+    /// continue from. Same result as `parseFileFull` except that a trailing line
+    /// still being written is left for the next append.
+    static func parseFileFullCheckpointed(at url: URL, forcedID: String? = nil) -> (Session, Checkpoint)? {
+        guard let identity = fileIdentity(url),
+              let end = completeLinesEnd(url: url, size: identity.size) else { return nil }
+        SessionInfoMetrics.shared.beginTranscript(path: url.path)
+        defer { SessionInfoMetrics.shared.endTranscript(path: url.path) }
+        var state = FullParseState(url: url)
+        do {
+            try JSONLReader(url: url, maximumBytes: end).forEachLine { rawLine in state.consume(rawLine) }
+        } catch {
+            return nil
+        }
+        guard let after = fileIdentity(url), after.system == identity.system, after.file == identity.file else { return nil }
+        let checkpoint = Checkpoint(systemNumber: identity.system, fileNumber: identity.file, byteOffset: end, state: state)
+        return (state.makeSession(forcedID: forcedID, size: Int(identity.size)), checkpoint)
+    }
+
+    /// Continues `checkpoint` with the complete lines appended since. Falls back
+    /// when the file was replaced or shrank, or a line is oversize (the reader's
+    /// omitted-line stub is not reproduced here).
+    static func parseFileAppend(at url: URL, forcedID: String? = nil, checkpoint: Checkpoint) -> AppendResult {
+        guard let identity = fileIdentity(url),
+              identity.system == checkpoint.systemNumber,
+              identity.file == checkpoint.fileNumber,
+              identity.size >= checkpoint.byteOffset else { return .fallbackToFullParse }
+        guard identity.size > checkpoint.byteOffset,
+              let handle = try? FileHandle(forReadingFrom: url) else {
+            return identity.size == checkpoint.byteOffset ? .unchanged : .fallbackToFullParse
+        }
+        defer { try? handle.close() }
+        let data: Data
+        do {
+            try handle.seek(toOffset: checkpoint.byteOffset)
+            data = try handle.read(upToCount: Int(identity.size - checkpoint.byteOffset)) ?? Data()
+        } catch {
+            return .fallbackToFullParse
+        }
+        guard let lastNewline = data.lastIndex(of: 0x0A) else { return .unchanged }
+        var state = checkpoint.state
+        var lineStart = data.startIndex
+        while lineStart <= lastNewline {
+            let lineEnd = data[lineStart...lastNewline].firstIndex(of: 0x0A)!
+            let piece = data[lineStart..<lineEnd]
+            lineStart = lineEnd + 1
+            guard !piece.isEmpty else { continue }
+            guard piece.count <= 8_388_608, let line = String(data: piece, encoding: .utf8) else {
+                return .fallbackToFullParse
+            }
+            state.consume(line)
+        }
+        let next = Checkpoint(systemNumber: checkpoint.systemNumber, fileNumber: checkpoint.fileNumber,
+                              byteOffset: checkpoint.byteOffset + UInt64(lastNewline - data.startIndex + 1),
+                              state: state)
+        return .appended(state.makeSession(forcedID: forcedID, size: Int(identity.size)), next)
+    }
+
+    /// Byte length up to and including the last newline at or before `size`.
+    private static func completeLinesEnd(url: URL, size: UInt64) -> UInt64? {
+        guard size > 0 else { return 0 }
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? handle.close() }
+        var end = size
+        let window: UInt64 = 64 * 1024
+        while end > 0 {
+            let start = end > window ? end - window : 0
+            guard (try? handle.seek(toOffset: start)) != nil,
+                  let chunk = try? handle.read(upToCount: Int(end - start)) else { return nil }
+            if let nl = chunk.lastIndex(of: 0x0A) {
+                return start + UInt64(nl - chunk.startIndex + 1)
+            }
+            end = start
+        }
+        return 0
     }
 
     private static func enrichWithDesktopMetadataIfNeeded(_ session: Session, url: URL) -> Session {
