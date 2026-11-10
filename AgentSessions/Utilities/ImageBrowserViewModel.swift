@@ -29,8 +29,28 @@ final class ImageBrowserViewModel: ObservableObject {
         let userPromptIndex: Int?
         let payload: SessionImagePayload
         let fileSignature: ImageBrowserFileSignature
+        /// Stored, not computed: `payload.stableID` hashes the file path with
+        /// SHA-256, and the grid reads `id` for every card on every render.
+        let id: String
 
-        var id: String { "\(sessionSource.rawValue):\(sessionID)-\(payload.stableID)" }
+        init(sessionID: String, sessionTitle: String, sessionModifiedAt: Date, sessionFileURL: URL,
+             sessionSource: SessionSource, sessionProject: String?, sessionImageIndex: Int, lineIndex: Int,
+             eventID: String, userPromptIndex: Int?, payload: SessionImagePayload,
+             fileSignature: ImageBrowserFileSignature) {
+            self.sessionID = sessionID
+            self.sessionTitle = sessionTitle
+            self.sessionModifiedAt = sessionModifiedAt
+            self.sessionFileURL = sessionFileURL
+            self.sessionSource = sessionSource
+            self.sessionProject = sessionProject
+            self.sessionImageIndex = sessionImageIndex
+            self.lineIndex = lineIndex
+            self.eventID = eventID
+            self.userPromptIndex = userPromptIndex
+            self.payload = payload
+            self.fileSignature = fileSignature
+            self.id = "\(sessionSource.rawValue):\(sessionID)-\(payload.stableID)"
+        }
 
         var approxSizeText: String {
             ByteCountFormatter.string(fromByteCount: Int64(payload.approxBytes), countStyle: .file)
@@ -67,6 +87,8 @@ final class ImageBrowserViewModel: ObservableObject {
     @Published private(set) var state: LoadState = .idle
     @Published private(set) var items: [Item] = []
     @Published private(set) var thumbnails: [String: NSImage] = [:]
+    /// Items whose thumbnail could not be made, so the grid stops showing a spinner.
+    @Published private(set) var failedThumbnailIDs: Set<String> = []
     @Published var selectedProject: String? = nil
     @Published var selectedSources: Set<SessionSource> = []
     @Published var selectedItemID: String? = nil
@@ -75,7 +97,12 @@ final class ImageBrowserViewModel: ObservableObject {
     private let indexCache: ImageBrowserIndexCache
     private let thumbnailCache: ImageBrowserThumbnailCache
 
-    private var allSessions: [Session] = []
+    private var allSessions: [Session] = [] {
+        didSet { cachedAvailableProjects = nil; cachedAvailableSources = nil }
+    }
+    /// The filter menus read these on every render; `repoName` stats files.
+    private var cachedAvailableProjects: [String]?
+    private var cachedAvailableSources: [SessionSource]?
     private var sessionByKey: [SessionCacheKey: Session] = [:]
 
     // Indexed items per source-scoped session key (for incremental updates without resetting from zero)
@@ -134,15 +161,21 @@ final class ImageBrowserViewModel: ObservableObject {
     }
 
     var availableProjects: [String] {
+        if let cachedAvailableProjects { return cachedAvailableProjects }
         let projects = allSessions
             .compactMap { $0.repoName?.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
-        return Array(Set(projects)).sorted()
+        let sorted = Array(Set(projects)).sorted()
+        cachedAvailableProjects = sorted
+        return sorted
     }
 
     var availableSources: [SessionSource] {
+        if let cachedAvailableSources { return cachedAvailableSources }
         let present = Set(allSessions.map(\.source))
-        return SessionSource.allCases.filter { present.contains($0) }
+        let sources = SessionSource.allCases.filter { present.contains($0) }
+        cachedAvailableSources = sources
+        return sources
     }
 
     var allCodingSources: Set<SessionSource> {
@@ -165,7 +198,7 @@ final class ImageBrowserViewModel: ObservableObject {
     }
 
     func requestThumbnail(for item: Item) {
-        if thumbnails[item.id] != nil { return }
+        if thumbnails[item.id] != nil || failedThumbnailIDs.contains(item.id) { return }
 
         let key = item.imageKey
         if let present = thumbnailCache.thumbnailIfPresent(for: key) {
@@ -180,13 +213,16 @@ final class ImageBrowserViewModel: ObservableObject {
         let thumbnailCache = thumbnailCache
         Task.detached(priority: .userInitiated) { [weak self] in
             do {
-                let decoded = try CodexSessionImagePayload.decodeImageData(
-                    payload: item.payload,
-                    maxDecodedBytes: 25 * 1024 * 1024,
-                    shouldCancel: { Task.isCancelled }
-                )
+                // Decode the session payload only on a cache miss: a disk hit
+                // needs none of it.
+                let img = try thumbnailCache.loadOrCreateThumbnail(for: key) {
+                    try CodexSessionImagePayload.decodeImageData(
+                        payload: item.payload,
+                        maxDecodedBytes: 25 * 1024 * 1024,
+                        shouldCancel: { Task.isCancelled }
+                    )
+                }
                 guard let self else { return }
-                let img = try thumbnailCache.loadOrCreateThumbnail(for: key) { decoded }
                 if Task.isCancelled { return }
                 await MainActor.run {
                     self.thumbnails[item.id] = img
@@ -195,8 +231,13 @@ final class ImageBrowserViewModel: ObservableObject {
                         ImageBrowserPerfMetrics.markFirstThumbnailShown()
                     }
                 }
+            } catch is CancellationError {
+                // Scrolled away; a later appearance asks again.
             } catch {
-                // Best-effort thumbnail; ignore failures.
+                // Best-effort thumbnail: show the placeholder glyph instead of a spinner.
+                await MainActor.run { [weak self] in
+                    _ = self?.failedThumbnailIDs.insert(item.id)
+                }
             }
         }
     }
@@ -345,6 +386,7 @@ private extension ImageBrowserViewModel {
 // state. Nothing outside this file calls it; the widened access exists for the test.
 extension ImageBrowserViewModel {
     func buildItems(for session: Session, index: ImageBrowserStoredIndex) -> [Item] {
+        let sessionProject = session.repoName // once per session, not per image
         switch session.source {
         case .opencode:
             let images = index.openCodeImages ?? []
@@ -387,7 +429,7 @@ extension ImageBrowserViewModel {
                         sessionModifiedAt: session.modifiedAt,
                         sessionFileURL: fileURL,
                         sessionSource: session.source,
-                        sessionProject: session.repoName,
+                        sessionProject: sessionProject,
                         sessionImageIndex: i + 1,
                         lineIndex: eventIndex,
                         eventID: eventID,
@@ -426,7 +468,7 @@ extension ImageBrowserViewModel {
                         sessionModifiedAt: session.modifiedAt,
                         sessionFileURL: url,
                         sessionSource: session.source,
-                        sessionProject: session.repoName,
+                        sessionProject: sessionProject,
                         sessionImageIndex: i + 1,
                         lineIndex: eventIndex,
                         eventID: eventID,
@@ -457,7 +499,7 @@ extension ImageBrowserViewModel {
                         sessionModifiedAt: session.modifiedAt,
                         sessionFileURL: url,
                         sessionSource: session.source,
-                        sessionProject: session.repoName,
+                        sessionProject: sessionProject,
                         sessionImageIndex: i + 1,
                         lineIndex: max(0, image.lineIndex),
                         eventID: eventID,
@@ -536,7 +578,7 @@ extension ImageBrowserViewModel {
                         sessionModifiedAt: session.modifiedAt,
                         sessionFileURL: url,
                         sessionSource: session.source,
-                        sessionProject: session.repoName,
+                        sessionProject: sessionProject,
                         sessionImageIndex: i + 1,
                         lineIndex: resolvedUserEventIndex,
                         eventID: openClawEventID

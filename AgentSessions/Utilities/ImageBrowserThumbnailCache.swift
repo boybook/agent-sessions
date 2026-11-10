@@ -65,7 +65,10 @@ final class ImageBrowserThumbnailCache {
             return (url, data)
         }
 
-        if let dataFromDisk, let img = NSImage(data: dataFromDisk) {
+        // Decoded here, off the main thread: `NSImage(data:)` defers decoding to
+        // its first draw, which is on the main thread.
+        if let dataFromDisk,
+           let img = CodexSessionImagePayload.makeThumbnail(from: dataFromDisk, maxPixelSize: thumbnailMaxPixelSize) {
             memoryCache.setObject(img, forKey: key.stableID as NSString, cost: estimatedCostBytes(for: img))
             return img
         }

@@ -28,6 +28,9 @@ final class CodexImagesWindowController: NSObject, NSWindowDelegate {
         }
 
         let hv = AppearanceHostingView(rootView: wrapped)
+        // The gallery's filters and actions are a SwiftUI toolbar; title and
+        // image-count subtitle come from the view too.
+        hv.sceneBridgingOptions = [.toolbars, .title]
         hv.onAppearanceChanged = { [weak self] in
             Task { @MainActor in
                 self?.handleEffectiveAppearanceChange()

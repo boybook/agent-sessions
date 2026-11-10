@@ -346,17 +346,23 @@ struct CodexSessionImagesGalleryView: View {
     @State private var saveTask: Task<Void, Never>? = nil
     @State private var activeSaveToken: UUID? = nil
 
+    /// Date sections, rebuilt when the items change rather than on every body pass.
+    @State private var dateGroups: [DateGroup] = []
+    /// Set by a thumbnail click so the selection change does not re-center the grid.
+    @State private var selectionIsFromClick: Bool = false
+
     init(viewModel: ImageBrowserViewModel) {
         self.viewModel = viewModel
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            Divider()
-            content
-        }
+        content
         .frame(minWidth: 900, minHeight: 560)
+        // Filters and image actions live in the window toolbar (the hosting view
+        // bridges SwiftUI toolbars); the image count is the window subtitle.
+        .toolbar { galleryToolbar }
+        .navigationTitle(Text("Image Browser"))
+        .navigationSubtitle(Text("\(viewModel.items.count) images"))
         // Finder-like: Space opens Quick Look for the selected image.
         .overlay {
             Button("") { quickLookSelected() }
@@ -365,10 +371,17 @@ struct CodexSessionImagesGalleryView: View {
                 .frame(width: 0, height: 0)
                 .accessibilityHidden(true)
         }
-        .onAppear { viewModel.markWindowShown() }
+        .onAppear {
+            viewModel.markWindowShown()
+            dateGroups = Self.makeDateGroups(viewModel.items)
+        }
         .onChange(of: viewModel.selectedProject) { _, _ in viewModel.onFiltersChanged() }
         .onChange(of: viewModel.selectedSources) { _, _ in viewModel.onFiltersChanged() }
         .onChange(of: viewModel.items) { _, newValue in
+            // Grouping sorts every item; do it when the items change, not on
+            // every body pass (selection, each thumbnail landing).
+            dateGroups = Self.makeDateGroups(newValue)
+
             if let pendingSelectedItemID, newValue.contains(where: { $0.id == pendingSelectedItemID }) {
                 viewModel.selectedItemID = pendingSelectedItemID
                 self.pendingSelectedItemID = nil
@@ -402,129 +415,108 @@ struct CodexSessionImagesGalleryView: View {
         }
     }
 
-    private var header: some View {
-        HStack(spacing: 10) {
+    // MARK: Toolbar
+
+    @ToolbarContentBuilder
+    private var galleryToolbar: some ToolbarContent {
+        ToolbarItemGroup(placement: .navigation) {
             projectFilterMenu
             agentFilterMenu
-
-            Spacer()
-
-            let imageCount = viewModel.items.count
-            Text("\(imageCount) images")
-                .font(.system(size: 12, weight: .medium, design: .monospaced))
-                .foregroundStyle(.secondary)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background(Color(NSColor.controlBackgroundColor))
+
+        ToolbarItemGroup(placement: .primaryAction) {
+            let item = selectedItem
+            Group {
+            Button {
+                if let item { openInPreview(item: item) }
+            } label: {
+                Label("Open in Preview", systemImage: "arrow.up.forward.app")
+            }
+            .help("Open in Preview")
+
+            Button {
+                if let item { copyImage(item: item) }
+            } label: {
+                Label("Copy Image", systemImage: "doc.on.doc")
+            }
+            .help("Copy Image")
+
+            Button {
+                if let item { copyImagePath(item: item) }
+            } label: {
+                Label("Copy Image Path (for CLI agent)", systemImage: "link")
+            }
+            .help("Copy Image Path (for CLI agent)")
+
+            Menu {
+                Button("Save to Downloads") { if let item { saveToDownloads(item: item) } }
+                Button("Save…") { if let item { saveWithPanel(item: item) } }
+            } label: {
+                Label("Save", systemImage: "square.and.arrow.down")
+            }
+            .disabled(isSaving)
+            .help("Save")
+            }
+            .disabled(item == nil)
+        }
+
+        if #available(macOS 26.0, *) {
+            ToolbarSpacer(.fixed, placement: .primaryAction)
+        }
+
+        ToolbarItem(placement: .primaryAction) {
+            Button {
+                if let item = selectedItem { navigateToSession(item: item) }
+            } label: {
+                Text("Navigate to Session")
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(selectedItem == nil)
+        }
     }
 
     private var projectFilterMenu: some View {
-        HStack(spacing: 8) {
-            Text("Project:")
-                .font(.system(size: 11, weight: .medium, design: .monospaced))
-                .foregroundStyle(.secondary)
-
-            Menu {
-                Button {
-                    viewModel.selectedProject = nil
-                } label: {
-                    if viewModel.selectedProject == nil {
-                        Label("All Projects", systemImage: "checkmark")
-                    } else {
-                        Text("All Projects")
-                    }
-                }
-
-                if !viewModel.availableProjects.isEmpty {
-                    Divider()
-                }
-
-                ForEach(viewModel.availableProjects, id: \.self) { project in
-                    Button {
-                        viewModel.selectedProject = project
-                    } label: {
-                        if viewModel.selectedProject == project {
-                            Label(project, systemImage: "checkmark")
-                        } else {
-                            Text(project)
-                        }
-                    }
-                }
-            } label: {
-                HStack(spacing: 6) {
-                    Text(viewModel.selectedProject ?? "All Projects")
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 11, weight: .semibold))
-                        .opacity(0.7)
-                }
-                .font(.system(size: 12, weight: .medium, design: .monospaced))
+        Picker("Project", selection: $viewModel.selectedProject) {
+            Text("All Projects").tag(String?.none)
+            if !viewModel.availableProjects.isEmpty {
+                Divider()
             }
-            .controlSize(.small)
-            .buttonStyle(.bordered)
+            ForEach(viewModel.availableProjects, id: \.self) { project in
+                Text(verbatim: project).tag(Optional(project))
+            }
         }
+        .pickerStyle(.menu)
+        .help("Project")
     }
 
     private var agentFilterMenu: some View {
-        HStack(spacing: 8) {
-            Text("Agent:")
-                .font(.system(size: 11, weight: .medium, design: .monospaced))
-                .foregroundStyle(.secondary)
-
-            Menu {
-                Button {
-                    viewModel.selectedSources = viewModel.allCodingSources
-                } label: {
-                    agentMenuCheckboxRow(
-                        title: "All Coding Agents",
-                        isOn: viewModel.isAllCodingAgentsSelected
-                    )
-                }
-
-                if !viewModel.availableSources.isEmpty {
-                    Divider()
-                }
-
-                ForEach(viewModel.availableSources, id: \.self) { source in
-                    Button {
-                        toggleAgent(source)
-                    } label: {
-                        agentMenuCheckboxRow(title: source.displayName, isOn: viewModel.selectedSources.contains(source))
-                    }
-                }
-            } label: {
-                HStack(spacing: 6) {
-                    Text(agentMenuTitle)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 11, weight: .semibold))
-                        .opacity(0.7)
-                }
-                .font(.system(size: 12, weight: .medium, design: .monospaced))
+        Menu {
+            Button("All Coding Agents") {
+                viewModel.selectedSources = viewModel.allCodingSources
             }
-            .controlSize(.small)
-            .buttonStyle(.bordered)
-        }
-    }
+            .disabled(viewModel.isAllCodingAgentsSelected)
 
-    @ViewBuilder
-    private func agentMenuCheckboxRow(title: String, isOn: Bool) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: isOn ? "checkmark.square.fill" : "square")
-                .foregroundStyle(isOn ? Color.accentColor : .secondary)
-            Text(title)
+            if !viewModel.availableSources.isEmpty {
+                Divider()
+            }
+
+            ForEach(viewModel.availableSources, id: \.self) { source in
+                Toggle(source.displayName, isOn: Binding(
+                    get: { viewModel.selectedSources.contains(source) },
+                    set: { _ in toggleAgent(source) }))
+            }
+        } label: {
+            Text(agentMenuTitle)
         }
+        .help("Agent")
     }
 
     private var agentMenuTitle: String {
         let selected = viewModel.selectedSources
-        if viewModel.isAllCodingAgentsSelected { return "All Coding Agents" }
+        if viewModel.isAllCodingAgentsSelected { return String(localized: "All Coding Agents") }
         if selected.count == 1, let one = selected.first { return one.displayName }
-        if selected.isEmpty { return "No Agents" }
-        return "\(selected.count) selected"
+        if selected.isEmpty { return String(localized: "No Agents") }
+        return String(localized: "\(selected.count) selected")
     }
 
     private func toggleAgent(_ source: SessionSource) {
@@ -536,19 +528,7 @@ struct CodexSessionImagesGalleryView: View {
         }
     }
 
-    private func metaLabel(_ text: String) -> some View {
-        Text(text)
-            .font(.system(size: 11, weight: .semibold, design: .monospaced))
-            .foregroundStyle(.secondary)
-    }
-
-    private func metaValue(_ text: String) -> some View {
-        Text(text)
-            .font(.system(size: 12, weight: .regular, design: .monospaced))
-            .foregroundStyle(.primary)
-            .lineLimit(1)
-            .truncationMode(.tail)
-    }
+    // MARK: Content
 
     @ViewBuilder
     private var content: some View {
@@ -558,7 +538,6 @@ struct CodexSessionImagesGalleryView: View {
                 VStack(spacing: 12) {
                     ProgressView()
                     Text(loadingStatusText)
-                        .font(.system(size: 12, weight: .regular, design: .monospaced))
                         .foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -589,12 +568,14 @@ struct CodexSessionImagesGalleryView: View {
         }
     }
 
-    private var dateGroups: [DateGroup] {
+    private static let dayIDFormatter = ISO8601DateFormatter()
+
+    private static func makeDateGroups(_ items: [ImageBrowserViewModel.Item]) -> [DateGroup] {
         let calendar = Calendar.current
         let todayStart = calendar.startOfDay(for: Date())
         let yesterdayStart = calendar.date(byAdding: .day, value: -1, to: todayStart) ?? todayStart
 
-        let sorted = viewModel.items.sorted { a, b in
+        let sorted = items.sorted { a, b in
             if a.sessionModifiedAt != b.sessionModifiedAt { return a.sessionModifiedAt > b.sessionModifiedAt }
             if a.sessionID != b.sessionID { return a.sessionID > b.sessionID }
             return a.sortOffset > b.sortOffset
@@ -610,14 +591,14 @@ struct CodexSessionImagesGalleryView: View {
         return orderedDays.map { dayStart in
             let title: String
             if dayStart == todayStart {
-                title = "Today"
+                title = String(localized: "Today")
             } else if dayStart == yesterdayStart {
-                title = "Yesterday"
+                title = String(localized: "Yesterday")
             } else {
                 title = AppDateFormatting.monthDayAbbrev(dayStart)
             }
 
-            let id = ISO8601DateFormatter().string(from: dayStart)
+            let id = dayIDFormatter.string(from: dayStart)
             return DateGroup(id: id, title: title, items: buckets[dayStart] ?? [])
         }
     }
@@ -625,45 +606,66 @@ struct CodexSessionImagesGalleryView: View {
     private var loadingStatusText: String {
         switch viewModel.state {
         case .loadingSelected:
-            return "Indexing selected session…"
+            return String(localized: "Indexing selected session…")
         case .indexingBackground:
-            return "Indexing images…"
+            return String(localized: "Indexing images…")
         case .failed:
-            return "Index failed."
+            return String(localized: "Index failed.")
         case .idle, .loaded:
-            return "Ready"
+            return String(localized: "Ready")
         }
+    }
+
+    private func select(_ item: ImageBrowserViewModel.Item) {
+        guard viewModel.selectedItemID != item.id else { return }
+        // A clicked thumbnail is already on screen: do not re-center the grid.
+        selectionIsFromClick = true
+        viewModel.selectedItemID = item.id
     }
 
     private var thumbnailsPane: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 16) {
+                LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
                     ForEach(dateGroups) { group in
-                        Text(group.title.uppercased())
-                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 2)
-
-                        LazyVGrid(columns: gridColumns, spacing: 12) {
-                            ForEach(group.items, id: \.id) { item in
-                                CodexImageThumbnailCard(
-                                    viewModel: viewModel,
-                                    item: item,
-                                    isSelected: item.id == viewModel.selectedItemID,
-                                    onSelect: { viewModel.selectedItemID = item.id },
-                                    onDoubleClick: { openInPreview(item: item) }
-                                )
-                                .contextMenu {
-                                    imageActionsMenu(for: item)
+                        Section {
+                            LazyVGrid(columns: gridColumns, spacing: 10) {
+                                ForEach(group.items, id: \.id) { item in
+                                    CodexImageThumbnailCard(
+                                        item: item,
+                                        thumbnail: viewModel.thumbnails[item.id],
+                                        failed: viewModel.failedThumbnailIDs.contains(item.id),
+                                        isSelected: item.id == viewModel.selectedItemID,
+                                        onSelect: { select(item) },
+                                        onDoubleClick: { openInPreview(item: item) },
+                                        onAppear: { viewModel.requestThumbnail(for: item) }
+                                    )
+                                    .equatable()
+                                    .id(item.id)
+                                    .contextMenu {
+                                        imageActionsMenu(for: item)
+                                    }
                                 }
                             }
+                            .padding(.horizontal, 12)
+                            .padding(.bottom, 12)
+                        } header: {
+                            Text(verbatim: group.title)
+                                .font(.headline)
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .background(.bar)
                         }
                     }
                 }
-                .padding(12)
             }
             .onChange(of: viewModel.selectedItemID) { _, newValue in
+                if selectionIsFromClick {
+                    selectionIsFromClick = false
+                    return
+                }
                 guard let newValue else { return }
                 DispatchQueue.main.async {
                     proxy.scrollTo(newValue, anchor: .center)
@@ -675,147 +677,93 @@ struct CodexSessionImagesGalleryView: View {
     }
 
     private var detailPane: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(spacing: 0) {
             if let item = selectedItem {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(Color.gray.opacity(0.06))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .stroke(Color.gray.opacity(0.18), lineWidth: 1)
-                        )
-
-                    if isPreviewLoading {
-                        VStack(spacing: 10) {
-                            ProgressView()
-                            Text("Loading preview…")
-                                .font(.system(size: 12, weight: .regular, design: .monospaced))
-                                .foregroundStyle(.secondary)
-                        }
-                    } else if let img = previewImage {
-                        Image(nsImage: img)
-                            .resizable()
-                            .scaledToFit()
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .padding(14)
-                    } else if let err = previewError {
-                        ContentUnavailableView(err, systemImage: "photo")
-                            .padding(12)
-                    } else {
-                        ContentUnavailableView("Select an image", systemImage: "photo")
-                            .padding(12)
-                    }
-                }
-
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack(spacing: 10) {
-                        Button("Navigate to Session") { navigateToSession(item: item) }
-                            .buttonStyle(.borderedProminent)
-
-                        Button {
-                            openInPreview(item: item)
-                        } label: {
-                            Image(systemName: "arrow.up.right.square")
-                                .font(.system(size: 14, weight: .semibold))
-                        }
-                        .buttonStyle(.borderless)
-                        .help("Open in Preview")
-
-                        Button {
-                            copyImagePath(item: item)
-                        } label: {
-                            Image(systemName: "link")
-                                .font(.system(size: 14, weight: .semibold))
-                        }
-                        .buttonStyle(.borderless)
-                        .help("Copy Image Path (for CLI agent)")
-
-                        Button {
-                            copyImage(item: item)
-                        } label: {
-                            Image(systemName: "doc.on.doc")
-                                .font(.system(size: 14, weight: .semibold))
-                        }
-                        .buttonStyle(.borderless)
-                        .help("Copy Image")
-
-                        Button {
-                            saveToDownloads(item: item)
-                        } label: {
-                            Image(systemName: "arrow.down.circle")
-                                .font(.system(size: 14, weight: .semibold))
-                        }
-                        .buttonStyle(.borderless)
-                        .disabled(isSaving)
-                        .help("Save to Downloads")
-
-                        Button(isSaving ? "Saving…" : "Save…") { saveWithPanel(item: item) }
-                            .disabled(isSaving)
-
-                        Spacer()
-                    }
-
-                    if let saveStatus {
-                        Text(saveStatus)
-                            .font(.system(size: 11, weight: .regular, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                    }
-
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("USER PROMPT")
-                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                            .foregroundStyle(.secondary)
-
-                        Text(promptText?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? (promptText ?? "") : "Prompt unavailable")
-                            .font(.system(size: 12, weight: .regular, design: .monospaced))
-                            .foregroundStyle(.primary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .textSelection(.enabled)
-                            .padding(10)
-                            .background(Color.gray.opacity(0.06))
-                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    }
-
-                    VStack(alignment: .leading, spacing: 8) {
-                        Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 8) {
-                            GridRow {
-                                metaLabel("SESSION")
-                                metaValue(item.sessionTitle)
-                            }
-                            GridRow {
-                                metaLabel("PROJECT")
-                                metaValue(item.sessionProject ?? "—")
-                            }
-                            GridRow {
-                                metaLabel("AGENT")
-                                metaValue(item.sessionSource.displayName)
-                            }
-                            GridRow {
-                                metaLabel("TIME")
-                                metaValue(AppDateFormatting.dateTimeMedium(item.sessionModifiedAt))
-                            }
-                            GridRow {
-                                metaLabel("SIZE")
-                                metaValue(ByteCountFormatter.string(fromByteCount: Int64(item.payload.approxBytes), countStyle: .file))
-                            }
-                            GridRow {
-                                metaLabel("DIMENSIONS")
-                                metaValue(dimensionsText ?? "—")
-                            }
-                        }
-                        .padding(10)
-                        .background(Color.gray.opacity(0.06))
-                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    }
-                }
+                previewArea(item: item)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                Divider()
+                infoArea(item: item)
             } else {
                 ContentUnavailableView("Select an image", systemImage: "photo.on.rectangle")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .padding(12)
         .frame(minWidth: 380)
         .background(Color(NSColor.textBackgroundColor))
+    }
+
+    /// The full-size preview decodes off the main thread. Until it lands, the
+    /// grid's thumbnail stands in (scaled up) under a spinner, so a switch never
+    /// shows an empty pane.
+    @ViewBuilder
+    private func previewArea(item: ImageBrowserViewModel.Item) -> some View {
+        ZStack {
+            if let img = previewImage ?? viewModel.thumbnails[item.id] {
+                // Fit the pane, but never past the full preview's own size: a
+                // small screenshot blown up to the pane only blurs. (The grid
+                // thumbnail stand-in is sized like the image it stands for.)
+                let cap = previewImage?.size
+                Image(nsImage: img)
+                    .resizable()
+                    .interpolation(.high)
+                    .scaledToFit()
+                    .frame(maxWidth: cap?.width, maxHeight: cap?.height)
+                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    .padding(20)
+            } else if let err = previewError {
+                ContentUnavailableView(err, systemImage: "photo")
+            }
+
+            if isPreviewLoading {
+                ProgressView()
+                    .controlSize(.regular)
+                    .padding(12)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            }
+        }
+    }
+
+    /// Get Info style: right-aligned secondary labels, selectable values.
+    private func infoArea(item: ImageBrowserViewModel.Item) -> some View {
+        Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 6) {
+            infoRow("User Prompt") {
+                if let prompt = promptText?.trimmingCharacters(in: .whitespacesAndNewlines), !prompt.isEmpty {
+                    Text(verbatim: prompt)
+                        .lineLimit(4)
+                        .textSelection(.enabled)
+                } else {
+                    Text("Prompt unavailable")
+                        .foregroundStyle(.secondary)
+                }
+            }
+            infoRow("Session") { Text(verbatim: item.sessionTitle).lineLimit(1).truncationMode(.tail) }
+            infoRow("Project") { Text(verbatim: item.sessionProject ?? "—") }
+            infoRow("Agent") { Text(verbatim: item.sessionSource.displayName) }
+            infoRow("Date") { Text(verbatim: AppDateFormatting.dateTimeMedium(item.sessionModifiedAt)) }
+            infoRow("Size") {
+                Text(verbatim: ByteCountFormatter.string(fromByteCount: Int64(item.payload.approxBytes), countStyle: .file))
+                    .monospacedDigit()
+            }
+            infoRow("Dimensions") { Text(verbatim: dimensionsText ?? "—").monospacedDigit() }
+            if let saveStatus {
+                infoRow("Save") {
+                    Text(verbatim: saveStatus).foregroundStyle(.secondary)
+                }
+            }
+        }
+        .font(.callout)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+    }
+
+    private func infoRow<Value: View>(_ label: LocalizedStringKey, @ViewBuilder value: () -> Value) -> some View {
+        GridRow {
+            Text(label)
+                .foregroundStyle(.secondary)
+                .gridColumnAlignment(.trailing)
+            value()
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
 
     private var selectedItem: ImageBrowserViewModel.Item? {
@@ -830,11 +778,7 @@ struct CodexSessionImagesGalleryView: View {
     }
 
     private var gridColumns: [GridItem] {
-        [
-            GridItem(.flexible(minimum: 140, maximum: 240), spacing: 12),
-            GridItem(.flexible(minimum: 140, maximum: 240), spacing: 12),
-            GridItem(.flexible(minimum: 140, maximum: 240), spacing: 12)
-        ]
+        [GridItem(.adaptive(minimum: 120, maximum: 200), spacing: 10)]
     }
 
     private func loadDetail() async {
@@ -847,7 +791,7 @@ struct CodexSessionImagesGalleryView: View {
         guard let item = selectedItem else { return }
 
         let maxDecodedBytes = 25 * 1024 * 1024
-        let previewMaxPixelSize = 3600
+        let previewMaxPixelSize = 2400
         let itemID = item.id
 
         isPreviewLoading = true
@@ -1184,51 +1128,62 @@ private struct TimeframeDivider: View {
     }
 }
 
-private struct CodexImageThumbnailCard: View {
-    @ObservedObject var viewModel: ImageBrowserViewModel
+/// A plain value view (no view-model observation), so a selection change or a
+/// thumbnail landing re-renders only the cards whose inputs changed.
+private struct CodexImageThumbnailCard: View, Equatable {
     let item: ImageBrowserViewModel.Item
+    let thumbnail: NSImage?
+    let failed: Bool
     let isSelected: Bool
     let onSelect: () -> Void
     let onDoubleClick: () -> Void
+    let onAppear: () -> Void
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.item.id == rhs.item.id
+            && lhs.thumbnail === rhs.thumbnail
+            && lhs.failed == rhs.failed
+            && lhs.isSelected == rhs.isSelected
+    }
 
     var body: some View {
-        ZStack(alignment: .bottomLeading) {
+        VStack(alignment: .leading, spacing: 4) {
             ZStack {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Color.gray.opacity(0.06))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .stroke(isSelected ? Color(nsColor: .systemBlue).opacity(0.85) : Color.gray.opacity(0.18),
-                                    lineWidth: isSelected ? 2 : 1)
-                    )
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color.secondary.opacity(0.08))
 
-                if let img = viewModel.thumbnails[item.id] {
-                    Image(nsImage: img)
+                if let thumbnail {
+                    Image(nsImage: thumbnail)
                         .resizable()
                         .aspectRatio(contentMode: .fit)
-                        .padding(10)
-                } else {
+                        .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                        .padding(6)
+                } else if failed {
                     Image(systemName: "photo")
-                        .font(.system(size: 22, weight: .regular))
-                        .foregroundStyle(.secondary)
+                        .font(.title2)
+                        .foregroundStyle(.tertiary)
+                } else {
+                    ProgressView()
+                        .controlSize(.small)
                 }
             }
-            .frame(height: 160)
+            .frame(height: 120)
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(isSelected ? Color.accentColor : Color.clear, lineWidth: 3)
+            )
 
-            Text(item.approxSizeText)
-                .font(.system(size: 11, weight: .medium, design: .monospaced))
+            Text(verbatim: item.approxSizeText)
+                .font(.caption)
+                .monospacedDigit()
                 .foregroundStyle(.secondary)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 6)
+                .padding(.horizontal, 2)
         }
         .contentShape(Rectangle())
-        .onTapGesture(count: 2) {
-            onSelect()
-            onDoubleClick()
-        }
-        .onTapGesture {
-            onSelect()
-        }
-        .onAppear { viewModel.requestThumbnail(for: item) }
+        // Select on the first click: a count-2 tap gesture ahead of a plain tap
+        // made every single click wait out the double-click interval.
+        .gesture(TapGesture(count: 2).onEnded { onDoubleClick() })
+        .simultaneousGesture(TapGesture().onEnded { onSelect() })
+        .onAppear(perform: onAppear)
     }
 }
