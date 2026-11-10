@@ -6,9 +6,9 @@ import UniformTypeIdentifiers
 private let sessionInfoDetailedTelemetryTimeoutNanoseconds: UInt64 = 5_000_000_000
 
 private enum TranscriptToolbarStyle {
-    static let baseFont = Font.system(size: 13, weight: .regular, design: .monospaced)
-    static let compactFont = Font.system(size: 11, weight: .regular, design: .monospaced)
-    static let popoverFont = Font.system(size: 12, weight: .medium, design: .monospaced)
+    static let baseFont = Font.system(size: 13, weight: .regular)
+    static let compactFont = Font.system(size: 11, weight: .regular)
+    static let popoverFont = Font.system(size: 12, weight: .medium)
     static let leadingPadding: CGFloat = 8
 }
 
@@ -653,6 +653,8 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     @State private var richInlineImagesByBlockIndex: [Int: [InlineSessionImage]] = [:]
     @State private var richHasInlineImages: Bool = false
     @State private var richInlineImagesTask: Task<Void, Never>?
+    /// Session the current `richInlineImagesByBlockIndex` was scanned for.
+    @State private var richInlineImagesSessionID: String?
 
     // Linkify (Task C3): mirrors SessionTerminalView's own AppStorage reads so
     // Rich mode clicks resolve/open files identically to Terminal mode. Plain
@@ -997,8 +999,17 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                         plainTranscriptView(session: session)
                     }
 
-                    if shouldShowFirstPromptJumpButton(session) || shouldShowJumpToLatestButton {
+                    // The first-prompt jump moved into the ⋯ menu: a button pinned
+                    // over the top of the transcript covered its content.
+                    if shouldShowJumpToLatestButton {
                         floatingTranscriptControls(session: session)
+                    }
+
+                    if isTranscriptLoading(session) {
+                        ProgressView()
+                            .controlSize(.small)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .allowsHitTesting(false)
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -1006,11 +1017,8 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 // inherited: the block table draws no background of its own, so
                 // without this the transcript silently took the window's chrome.
                 .background(Surface.paper)
-                Divider()
-                transcriptSessionIdentityStrip(session: session)
-                    .frame(height: 24)
-                    .frame(maxWidth: .infinity)
-                    .background(Surface.chrome)
+                // The session title strip under the transcript is gone: it
+                // repeated the selected list row.
             }
             .onAppear {
                 if lastRenderedSessionID != session.id || transcript.isEmpty {
@@ -1181,6 +1189,15 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
         }
     }
 
+    /// The selected session is still being parsed, or (Rich) its snapshot has not
+    /// landed yet: show a spinner instead of a blank/previous pane.
+    private func isTranscriptLoading(_ session: Session) -> Bool {
+        if indexer.isLoadingSession, indexer.loadingSessionID == session.id { return true }
+        if session.events.isEmpty, session.eventCount > 0 { return true }
+        if viewMode == .blocks, derivedState.snapshot.key?.sessionID != session.id { return true }
+        return false
+    }
+
     private func transcriptContentVersion(for session: Session) -> Int {
         var hasher = Hasher()
         hasher.combine(session.id)
@@ -1205,14 +1222,6 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
 
     private func floatingTranscriptControls(session: Session) -> some View {
         VStack {
-            if shouldShowFirstPromptJumpButton(session) {
-                transcriptJumpButton(
-                    systemImage: "arrow.up",
-                    help: "Jump to first user prompt",
-                    action: { jumpToFirstPrompt(session: session) }
-                )
-            }
-
             Spacer(minLength: 0)
 
             if shouldShowJumpToLatestButton {
@@ -1223,9 +1232,8 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 )
             }
         }
-        .frame(maxWidth: .infinity)
-        .frame(maxHeight: .infinity)
-        .padding(.top, firstPromptJumpTopInset)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+        .padding(.trailing, 16)
         .padding(.bottom, 12)
         .zIndex(4)
     }
@@ -1234,7 +1242,24 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
         viewMode == .terminal ? 56 : 12
     }
 
+    @ViewBuilder
     private func transcriptJumpButton(systemImage: String, help: String, action: @escaping () -> Void) -> some View {
+        if #available(macOS 26.0, *) {
+            Button(action: action) {
+                Image(systemName: systemImage)
+                    .frame(width: 16, height: 16)
+            }
+            .buttonStyle(.glass)
+            .buttonBorderShape(.circle)
+            .controlSize(.large)
+            .help(help)
+            .accessibilityLabel(help)
+        } else {
+            classicTranscriptJumpButton(systemImage: systemImage, help: help, action: action)
+        }
+    }
+
+    private func classicTranscriptJumpButton(systemImage: String, help: String, action: @escaping () -> Void) -> some View {
         Button(action: {
             action()
         }) {
@@ -1303,8 +1328,13 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
         }
 
         let sessionSnapshot = session
-        richHasInlineImages = false
-        richInlineImagesByBlockIndex = [:]
+        // A live append rescans the same session: keep the current map until the
+        // new one lands. Clearing it collapsed every image row, and the rescan
+        // 650ms later re-grew them, pushing a tail reader off the end on every refresh.
+        if richInlineImagesSessionID != session.id {
+            richHasInlineImages = false
+            richInlineImagesByBlockIndex = [:]
+        }
 
         richInlineImagesTask = Task.detached(priority: .utility) { [sessionSnapshot] in
             try? await Task.sleep(nanoseconds: 650_000_000)
@@ -1318,6 +1348,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
                 guard !Task.isCancelled else { return }
                 richHasInlineImages = !out.isEmpty
                 richInlineImagesByBlockIndex = out
+                richInlineImagesSessionID = sessionSnapshot.id
             }
         }
     }
@@ -1422,7 +1453,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             guard activeRoleFilters.isEmpty || activeRoleFilters.contains(role) else { return 0 }
             let markers = TranscriptTelemetryPresentation.markers(changes: selectedTelemetry?.configurationChanges ?? [], blocks: snap.blocks)
             let groups = derivedState.messageGroups(showsContext: showsContext, markers: markers, imageBlocks: Set(richInlineImagesByBlockIndex.filter { !$0.value.isEmpty }.keys))
-            return groups.groupsByID.values.filter { TranscriptRoleFilter.governing($0.block, source: snap.source) == role }.count
+            return derivedState.userGroupCount(groups, source: snap.source)
         case .tools: return snap.toolJumpIDs.count
         case .errors:
             return SessionRoleFilters.shownErrorStops(snap.errorJumpIDs, failedInvocationIDs: snap.failedInvocationIDs,
@@ -1464,7 +1495,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     }
 
     private func roleFilterChipRow(source: SessionSource, density: RoleChipDensity) -> some View {
-        HStack(alignment: .center, spacing: density == .regular ? 10 : 4) {
+        HStack(alignment: .center, spacing: 2) {
             ForEach(TranscriptRoleFilter.allCases, id: \.self) { role in
                 sessionRoleFilterChip(role, source: source, density: density)
             }
@@ -1473,12 +1504,8 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
 
     private func sessionRoleFilterChip(_ role: TranscriptRoleFilter, source: SessionSource,
                                        density: RoleChipDensity) -> some View {
-        // A chip's fill states one thing only: whether this role is currently
-        // shown. An earlier version dimmed every chip once all four were active,
-        // on the theory that "all on" equals "no filter" — but that made turning
-        // the last role back on look like a click that did nothing, while
-        // silently dimming the other three. Selection state is not a place to be
-        // clever.
+        // A chip's on state says one thing only: whether this role is currently
+        // shown (dimming all four once all were on made the last click look dead).
         let isOn = activeRoleFilters.contains(role)
         // A role's occurrences are reachable when it's shown (explicitly on, or
         // the "no filter" empty-set state) and it actually has ≥1 block.
@@ -1486,70 +1513,39 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
         let count = roleOccurrenceCount(role)
         let navEnabled = shown && count > 0
         let label = roleFilterLabel(role)
-        // Errors is the only role whose count changes the decision to press it,
-        // so it is the only one that carries a number. A session with no errors
-        // shows a dimmed chip and no count rather than a reassuring zero.
+        // Errors is the only role whose count changes the decision to press it;
         // Tools also carries a muted count while off, so hidden work stays visible.
         let showsCount = (role == .errors && count > 0) || (role == .tools && !isOn && count > 0)
-        // The jump chevrons appear on the chip being navigated, not on all four
-        // at once: eight permanent controls for one action was most of the old
-        // second row's weight. ⌘G / ⇧⌘G stay available regardless.
-        let showsNav = navEnabled && hoveredRoleFilter == role
-        return HStack(spacing: 3) {
-            Button(action: { toggleRoleFilter(role) }) {
-                HStack(spacing: density == .minimal ? 4 : 6) {
-                    Circle()
-                        .fill(roleFilterAccent(role, source: source).opacity(isOn ? 1.0 : 0.3))
-                        .frame(width: 9, height: 9)
-                    if density != .minimal {
-                        Text(label)
-                            .font(.system(size: 12, weight: .regular))
-                            .foregroundStyle(isOn ? Color.primary : Color.secondary)
-                            .lineLimit(1)
-                    }
-                    if showsCount {
-                        Text("\(count)")
-                            .font(.system(size: 11, weight: .medium))
-                            .monospacedDigit()
-                            .foregroundStyle(role == .tools ? Color.secondary : roleFilterAccent(role, source: source))
-                    }
+        let accent = roleFilterAccent(role, source: source)
+        // A scope-bar toggle (accessory-bar style): the macOS control for
+        // narrowing what a content area shows. Stepping through a role's blocks
+        // is ⌘G / ⇧⌘G, or the toggle's context menu.
+        return Toggle(isOn: Binding(get: { isOn }, set: { _ in toggleRoleFilter(role) })) {
+            HStack(spacing: 5) {
+                Image(systemName: "circle.fill")
+                    .font(.system(size: 7))
+                    .foregroundStyle(accent.opacity(isOn ? 1.0 : 0.45))
+                if density != .minimal {
+                    Text(label)
+                        .lineLimit(1)
                 }
-                .padding(.horizontal, density == .regular ? 10 : 7)
-                .padding(.vertical, 4)
-                .background(
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .fill(isOn ? Color.secondary.opacity(0.12) : Color.clear)
-                )
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .fixedSize(horizontal: true, vertical: false)
-            .help(roleFilterChipHelp(role, label: label, isOn: isOn))
-            .accessibilityLabel(label)
-
-            // Width is reserved whether or not the chevrons are showing: if the
-            // chip grew on hover it would push its neighbours out from under a
-            // stationary pointer, which then reveals THEIR chevrons and shifts
-            // the row back — a flicker loop at every chip boundary. A narrow
-            // toolbar drops them instead of reserving the width.
-            if density == .regular {
-                HStack(spacing: 1) {
-                    roleJumpChevron("chevron.up", role: role, direction: -1,
-                                    enabled: navEnabled, help: "Previous \(label)")
-                    roleJumpChevron("chevron.down", role: role, direction: 1,
-                                    enabled: navEnabled, help: "Next \(label)")
+                if showsCount {
+                    Text("\(count)")
+                        .monospacedDigit()
+                        .foregroundStyle(role == .tools ? Color.secondary : accent)
                 }
-                .opacity(showsNav ? 1 : 0)
-                .allowsHitTesting(showsNav)
-                .accessibilityHidden(!showsNav)
             }
         }
-        .onHover { hovering in
-            if hovering {
-                hoveredRoleFilter = role
-            } else if hoveredRoleFilter == role {
-                hoveredRoleFilter = nil
-            }
+        .toggleStyle(.button)
+        .buttonStyle(.accessoryBar)
+        .fixedSize()
+        .help(roleFilterChipHelp(role, label: label, isOn: isOn))
+        .accessibilityLabel(label)
+        .contextMenu {
+            Button("Previous \(label)") { jumpRole(role, direction: -1) }
+                .disabled(!navEnabled)
+            Button("Next \(label)") { jumpRole(role, direction: 1) }
+                .disabled(!navEnabled)
         }
     }
 
@@ -1642,7 +1638,7 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     private func toolbarLayout(session: Session, placeUnifiedPillInline: Bool) -> some View {
         VStack(spacing: 0) {
             toolbarTopRow(session: session, placeUnifiedPillInline: placeUnifiedPillInline)
-                .frame(height: 44)
+                .frame(height: 36)
                 .background(Surface.chrome)
 
             if isFindBarVisible {
@@ -1695,93 +1691,40 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
 
             Spacer(minLength: 12)
 
-            // === TRAILING GROUP: identity, export, find, overflow ===
-            HStack(spacing: 12) {
-                HStack(spacing: 10) {
-                    if let fullID = sessionIDExtractor(session) {
-                        let displayLast4 = String(fullID.suffix(4))
-                        let short = extractShortID(for: session) ?? String(fullID.prefix(6))
-                        Button(action: { copySessionID(for: session) }) {
-                            HStack(spacing: 4) {
-                                Image(systemName: "doc.on.doc")
-                                    .imageScale(.medium)
-                                Text(displayLast4)
-                                    .font(TranscriptToolbarStyle.baseFont)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        .buttonStyle(.borderless)
-                        .lineLimit(1)
-                        .fixedSize(horizontal: true, vertical: false)
-                        .help("Copy session ID: \(short) (⌘⇧C)")
-                        .accessibilityLabel("Copy Session ID")
-                        .keyboardShortcut("c", modifiers: [.command, .shift])
-                        .popover(isPresented: $showIDCopiedPopover, arrowEdge: .bottom) {
-                            Text("ID Copied!")
-                                .padding(8)
-                                .font(TranscriptToolbarStyle.popoverFont)
-                        }
-                    }
-                    if StarredSessionsStore().contains(id: session.id, source: session.source) {
-                        pinnedBadge(session: session)
-                    }
+            // === TRAILING GROUP: transcript actions ===
+            // Accessory-bar icon buttons, matching the scope toggles. The session
+            // ID moved into the ⋯ menu (⇧⌘C still copies it); Saved shows in the
+            // list's star column.
+            HStack(spacing: 2) {
+                Button { copyAll() } label: {
+                    Label("Copy Transcript", systemImage: "doc.on.doc")
                 }
+                .help("Copy entire transcript to clipboard (⌥⌘C)")
+                .keyboardShortcut("c", modifiers: [.command, .option])
 
-                Divider().frame(height: 20)
-
-                Button("Copy") { copyAll() }
-                    .buttonStyle(.borderless)
-                    .font(TranscriptToolbarStyle.baseFont)
-                    .lineLimit(1)
-                    .fixedSize(horizontal: true, vertical: false)
-                    .help("Copy entire transcript to clipboard (⌥⌘C)")
-                    .keyboardShortcut("c", modifiers: [.command, .option])
-                    .accessibilityLabel("Copy Transcript")
-
-                Divider().frame(height: 20)
-
-                Button("Export") { exportMarkdown(session: session) }
-                    .buttonStyle(.borderless)
-                    .font(TranscriptToolbarStyle.baseFont)
-                    .lineLimit(1)
-                    .fixedSize(horizontal: true, vertical: false)
-                    .help("Export transcript as Markdown")
-                    .accessibilityLabel("Export Transcript")
-
-                Divider().frame(height: 20)
-
-                Button(action: {
-                    if isFindBarVisible {
-                        closeFind()
-                    } else {
-                        focusCoordinator.perform(.openTranscriptFind)
-                    }
-                }) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "magnifyingglass")
-                            .foregroundStyle(.secondary)
-                            .imageScale(.small)
-                        Text(isFindBarVisible ? "Done" : "Find")
-                            .font(TranscriptToolbarStyle.baseFont)
-                        if !isFindBarVisible {
-                            Text("⌘F")
-                                .font(.system(size: 11, weight: .medium, design: .monospaced))
-                                .foregroundStyle(.secondary)
-                                .accessibilityHidden(true)
-                        }
-                    }
+                Button { exportMarkdown(session: session) } label: {
+                    Label("Export Transcript", systemImage: "square.and.arrow.up")
                 }
-                .buttonStyle(.borderless)
-                .lineLimit(1)
-                .fixedSize(horizontal: true, vertical: false)
+                .help("Export transcript as Markdown")
+
+                Toggle(isOn: Binding(get: { isFindBarVisible }, set: { show in
+                    if show { focusCoordinator.perform(.openTranscriptFind) } else { closeFind() }
+                })) {
+                    Label("Find in session", systemImage: "magnifyingglass")
+                }
+                .toggleStyle(.button)
                 .help("Find in session (⌘F)")
-                .accessibilityLabel("Find in session")
 
-                Divider().frame(height: 20)
-
-                transcriptOverflowMenu
+                transcriptOverflowMenu(session: session)
             }
-            .padding(.trailing, 12)
+            .labelStyle(.iconOnly)
+            .buttonStyle(.accessoryBar)
+            .padding(.trailing, 8)
+            .background {
+                if sessionIDExtractor(session) != nil {
+                    shortcutButton(action: { copySessionID(for: session) }, key: "c", modifiers: [.command, .shift])
+                }
+            }
         }
     }
 
@@ -1825,8 +1768,16 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     /// Everything the transcript toolbar used to show at full weight but that is
     /// reached for by thinking rather than by muscle memory: view mode and text
     /// size. A named menu row is more discoverable than an unlabelled glyph.
-    private var transcriptOverflowMenu: some View {
+    private func transcriptOverflowMenu(session: Session) -> some View {
         Menu {
+            if sessionIDExtractor(session) != nil {
+                Button("Copy Session ID") { copySessionID(for: session) }
+            }
+            Button("Jump to first user prompt") { jumpToFirstPrompt(session: session) }
+                .disabled(!hasFirstPromptJumpTarget(session))
+
+            Divider()
+
             Menu {
                 // No ⌘1/⌘2/⌘3 here: those already toggle the Codex, Claude and
                 // Antigravity source filters (UnifiedSessionsView, and the
@@ -1855,7 +1806,11 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
             Button("Increase Text Size (⌘+)") { adjustFont(1) }
             Button("Decrease Text Size (⌘−)") { adjustFont(-1) }
         } label: {
+            // Borderless with the neighbours' hit area: an accessory-bar menu
+            // draws a standing bezel only as tall as the ellipsis glyph.
             Image(systemName: "ellipsis")
+                .frame(width: 28, height: 24)
+                .contentShape(Rectangle())
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
