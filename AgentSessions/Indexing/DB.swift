@@ -783,6 +783,23 @@ actor IndexDB {
 
     func rollbackSilently() { try? exec("ROLLBACK;") }
 
+    /// BEGIN/body/COMMIT in a single actor call. Separate `await db.begin()` /
+    /// `await db.upsert…()` / `await db.commit()` calls can interleave with another
+    /// task on this shared connection (actor reentrancy), which surfaces as
+    /// "cannot start a transaction within a transaction" and lets one caller's
+    /// ROLLBACK discard the other's writes. A failed BEGIN is rethrown without
+    /// ROLLBACK because any open transaction belongs to someone else.
+    func inTransaction(_ body: @Sendable (isolated IndexDB) throws -> Void) throws {
+        try begin()
+        do {
+            try body(self)
+            try commit()
+        } catch {
+            rollbackSilently()
+            throw error
+        }
+    }
+
     // MARK: - Simple query helpers
     private func queryOneInt64(_ sql: String) throws -> Int64 {
         guard let db = handle else { throw DBError.openFailed("db closed") }

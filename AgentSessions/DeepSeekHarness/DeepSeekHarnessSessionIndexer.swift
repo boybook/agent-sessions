@@ -285,8 +285,14 @@ final class DeepSeekHarnessSessionIndexer: ObservableObject, SessionIndexerProto
                 guard let index = self.allSessions.firstIndex(where: { $0.id == id }) else { return }
                 self.allSessions[index] = full
                 self.lastHealthy[id] = full
-                self.transcriptCache.set(id, transcript: SessionTranscriptBuilder.buildPlainTerminalTranscript(
-                    session: full, filters: .current(showTimestamps: false, showMeta: false), mode: .normal))
+                // Search-cache transcript is built off main (TranscriptCache is thread-safe):
+                // on large sessions the build held the main thread for ~1s per selection.
+                let cache = self.transcriptCache
+                let filters: TranscriptFilters = .current(showTimestamps: false, showMeta: false)
+                DispatchQueue.global(qos: .utility).async {
+                    cache.set(id, transcript: SessionTranscriptBuilder.buildPlainTerminalTranscript(
+                        session: full, filters: filters, mode: .normal))
+                }
                 self.recomputeNow()
             }
             _ = force

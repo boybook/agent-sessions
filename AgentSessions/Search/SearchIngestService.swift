@@ -224,6 +224,21 @@ actor SearchIngestService {
     /// was actually taken rather than inferring it indirectly from `Progress` alone.
     private(set) var earlyOutHitCountForTesting = 0
 
+    /// One `ingest` pass at a time across all sources (FIFO). Per-source passes
+    /// otherwise run concurrently on this actor, each full-parsing large transcripts,
+    /// which multiplies peak CPU and memory on heavy corpora.
+    private var ingestSlotBusy = false
+    private var ingestSlotWaiters: [CheckedContinuation<Void, Never>] = []
+
+    private func acquireIngestSlot() async {
+        guard ingestSlotBusy else { ingestSlotBusy = true; return }
+        await withCheckedContinuation { ingestSlotWaiters.append($0) }
+    }
+
+    private func releaseIngestSlot() {
+        if ingestSlotWaiters.isEmpty { ingestSlotBusy = false } else { ingestSlotWaiters.removeFirst().resume() }
+    }
+
     init(db: IndexDB, claudeImageIndexCache: ImageBrowserIndexCache = ImageBrowserIndexCache()) {
         self.db = db
         self.claudeImageIndexCache = claudeImageIndexCache
@@ -268,6 +283,8 @@ actor SearchIngestService {
                 quietSeconds: TimeInterval = 120,
                 reingestCooldownOverride: TimeInterval? = nil,
                 livePathAuthority: LivePathAuthority = .notApplicable) async throws -> Progress {
+        await acquireIngestSlot()
+        defer { releaseIngestSlot() }
         let sourceRaw = source.rawValue
         let descriptor = source.descriptor
 
@@ -722,7 +739,10 @@ actor SearchIngestService {
 
         guard let session = Self.parseFileFull(url: url,
                                                source: source,
-                                               sessionID: file.sessionID) else { return .parseFailed }
+                                               sessionID: file.sessionID) else {
+            Perf.event("searchIngestParseNil", "path=\(file.path)")
+            return .parseFailed
+        }
 
         // Post-parse anchor revalidation: the parse above is arbitrarily expensive, and
         // a successor generation may have been selected while it ran. Resolve again and
@@ -792,27 +812,32 @@ actor SearchIngestService {
             return SessionSearchTextBuilder.buildToolIO(session: session)
         }()
 
+        let filePath = session.filePath, sessionID = session.id
+        let fileMtime = file.mtime, fileSize = file.size
+        let searchMtime = file.searchMtime, searchSize = file.searchSize
         do {
-            try await db.begin()
-            try await db.upsertFile(path: session.filePath, mtime: file.mtime, size: file.size, source: sourceRaw)
-            try await db.upsertSessionMeta(meta)
-            try await db.upsertSessionSearch(sessionID: session.id,
-                                             source: sourceRaw,
-                                             mtime: file.searchMtime,
-                                             size: file.searchSize,
-                                             text: searchText)
-            if let toolIOText {
-                try await db.upsertSessionToolIO(sessionID: session.id,
-                                                 source: sourceRaw,
-                                                 mtime: file.searchMtime,
-                                                 size: file.searchSize,
-                                                 refTS: refTS,
-                                                 text: toolIOText)
+            // One actor call: concurrent per-source ingests share `db` and must not
+            // interleave inside each other's transaction (see IndexDB.inTransaction).
+            try await db.inTransaction { db in
+                try db.upsertFile(path: filePath, mtime: fileMtime, size: fileSize, source: sourceRaw)
+                try db.upsertSessionMeta(meta)
+                try db.upsertSessionSearch(sessionID: sessionID,
+                                           source: sourceRaw,
+                                           mtime: searchMtime,
+                                           size: searchSize,
+                                           text: searchText)
+                if let toolIOText {
+                    try db.upsertSessionToolIO(sessionID: sessionID,
+                                               source: sourceRaw,
+                                               mtime: searchMtime,
+                                               size: searchSize,
+                                               refTS: refTS,
+                                               text: toolIOText)
+                }
             }
-            try await db.commit()
-            return .ingested(selectedPath: session.filePath)
+            return .ingested(selectedPath: filePath)
         } catch {
-            await db.rollbackSilently()
+            Perf.event("searchIngestWriteFailed", "path=\(file.path) error=\(error)")
             return .parseFailed
         }
     }

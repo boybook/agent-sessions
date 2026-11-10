@@ -566,6 +566,20 @@ enum TranscriptTelemetryPresentation {
     /// Both full parsers use SHA256(path)-<one-based reader index>, with
     /// optional Claude content suffixes. Never interpret timestamps as ordering.
     static func recordIndex(eventID: String) -> Int? {
+        // Fast path for the canonical "<64 ASCII hex>-<digits>[-…]" shape (runs per block on
+        // view updates). Any other shape falls through to the original parse below.
+        let utf8 = eventID.utf8
+        if utf8.count > 65 {
+            let dashIndex = utf8.index(utf8.startIndex, offsetBy: 64)
+            let firstDigit = utf8.index(after: dashIndex)
+            if utf8[dashIndex] == UInt8(ascii: "-"),
+               (UInt8(ascii: "0")...UInt8(ascii: "9")).contains(utf8[firstDigit]),
+               utf8[..<dashIndex].allSatisfy({ ($0 >= 48 && $0 <= 57) || ($0 | 0x20 >= 97 && $0 | 0x20 <= 102) }) {
+                let end = utf8[firstDigit...].firstIndex(of: UInt8(ascii: "-")) ?? utf8.endIndex
+                guard let number = Int(Substring(utf8[firstDigit..<end])), number > 0 else { return nil }
+                return number - 1
+            }
+        }
         let parts = eventID.split(separator: "-")
         guard parts.count >= 2, parts[0].count == 64,
               parts[0].allSatisfy({ $0.isHexDigit }), let number = Int(parts[1]), number > 0 else { return nil }
@@ -576,10 +590,10 @@ enum TranscriptTelemetryPresentation {
     /// Meta blocks are excluded because a marker attached to one would render
     /// inside chrome rather than beside a message.
     static func anchors(_ blocks: [SessionTranscriptBuilder.LogicalBlock]) -> [(record: Int, block: Int)] {
-        blocks.filter { $0.kind != .meta }.compactMap { block -> (record: Int, block: Int)? in
+        Array(blocks.lazy.filter { $0.kind != .meta }.compactMap { block -> (record: Int, block: Int)? in
             guard let index = recordIndex(eventID: block.eventID) else { return nil }
             return (index, block.globalBlockIndex)
-        }
+        })
     }
 
     /// The block a change's marker belongs on: the first block at or after the
@@ -596,6 +610,8 @@ enum TranscriptTelemetryPresentation {
     static func markers(changes: [ConfigurationChange],
                         blocks: [SessionTranscriptBuilder.LogicalBlock],
                         locale: Locale = .current) -> [Int: [String]] {
+        // Hot path: called from view updates; skip the O(blocks) anchor scan when there is nothing to place.
+        guard !changes.isEmpty else { return [:] }
         var result: [Int: [String]] = [:]
         let anchors = Self.anchors(blocks)
         for change in changes {

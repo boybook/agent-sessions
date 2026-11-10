@@ -510,6 +510,16 @@ final class TranscriptDerivedState {
     @ObservationIgnored private var messageGroupBlocks: [SessionTranscriptBuilder.LogicalBlock] = []
     @ObservationIgnored private var messageGroupDigests: [Int] = []
     @ObservationIgnored private var messageGroupRevision = 0
+    @ObservationIgnored private var userGroupCountCache: (revision: Int, count: Int)?
+
+    /// `.user`-governed group count, memoized per message-group revision: the role chip row
+    /// reads it on every body pass (hover included), and a full filter is O(groups).
+    func userGroupCount(_ groups: TranscriptMessageGroupIndex, source: SessionSource) -> Int {
+        if let cache = userGroupCountCache, cache.revision == groups.revision { return cache.count }
+        let count = groups.groupsByID.values.filter { TranscriptRoleFilter.governing($0.block, source: source) == .user }.count
+        userGroupCountCache = (groups.revision, count)
+        return count
+    }
 
     /// True when `new` is the same stream as `old` after a live append: every key field but the
     /// event count and file size, and every non-snapshot input, are equal.

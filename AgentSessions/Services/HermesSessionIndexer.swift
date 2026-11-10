@@ -304,8 +304,11 @@ final class HermesSessionIndexer: ObservableObject, SessionIndexerProtocol, @unc
                                          lightweightCommands: current.lightweightCommands)
                     self.allSessions[idx] = merged
                     let filters: TranscriptFilters = .current(showTimestamps: false, showMeta: false)
-                    let transcript = SessionTranscriptBuilder.buildPlainTerminalTranscript(session: merged, filters: filters, mode: .normal)
-                    self.transcriptCache.set(merged.id, transcript: transcript)
+                    let cache = self.transcriptCache // thread-safe; build off main
+                    DispatchQueue.global(qos: .utility).async {
+                        let transcript = SessionTranscriptBuilder.buildPlainTerminalTranscript(session: merged, filters: filters, mode: .normal)
+                        cache.set(merged.id, transcript: transcript)
+                    }
                 }
                 self.recomputeNow()
             }

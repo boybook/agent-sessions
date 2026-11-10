@@ -1683,20 +1683,41 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
             // otherwise-stable row set — the common case, since the async image
             // scan lands after rows settle; a link-inputs-only change doesn't
             // affect height but reconfigure is cheap and correct either way).
+            // Heights change under a stable row set (typically the async image
+            // scan landing after a live append): keep the reader in place — at the
+            // end when following the tail, else on the same row — as the other
+            // cases do. Without this a tail reader was left above the end by the
+            // newly reserved image rows on every refresh.
+            let anchor = sticky ? nil : captureScrollAnchor()
             rows = newRows
             reconfigureVisibleRows()
             noteAllHeightsChanged()
+            if sticky {
+                pinToDocumentEnd()
+                scrollToBottom()
+            } else {
+                restoreScrollAnchor(anchor)
+            }
         case .appendOnly(let appendedCount):
             let firstNew = rows.count
+            // Image/marker changes cleared every cached height: existing rows must be re-measured too.
+            let heightsChanged = imagesChanged || markersChanged
+            let anchor = !sticky && heightsChanged ? captureScrollAnchor() : nil
             rows = newRows
             let idx = IndexSet(integersIn: firstNew..<(firstNew + appendedCount))
             NSAnimationContext.runAnimationGroup { ctx in
                 ctx.duration = 0
                 table.insertRows(at: idx, withAnimation: [])
             }
+            if heightsChanged { noteAllHeightsChanged() }
             // Sticky ⇒ ride the tail. Scrolled up ⇒ do NOT move (and, per brief,
             // no unseen-updates affordance here — that's a later task's concern).
-            if sticky { scrollToBottom() }
+            if sticky {
+                if heightsChanged { pinToDocumentEnd() }
+                scrollToBottom()
+            } else {
+                restoreScrollAnchor(anchor)
+            }
         case .appendWithReload(let appendedCount, let reloadRows):
             // Tool rows changed in place (an output arrived or grew, a group
             // gained a call) and `appendedCount` rows (maybe 0) were appended.
@@ -1714,7 +1735,8 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
             let visible = table.rows(in: table.visibleRect)
             let reloadsAboveViewport = visible.length > 0
                 && (reloadRows.first ?? Int.max) < visible.lowerBound
-            let anchor = !sticky && reloadsAboveViewport ? captureScrollAnchor() : nil
+            let heightsChanged = imagesChanged || markersChanged
+            let anchor = !sticky && (reloadsAboveViewport || heightsChanged) ? captureScrollAnchor() : nil
             rows = newRows
             dropCachedHeights(forRowIDs: Set(reloadRows.map { newRows[$0].id }))
             NSAnimationContext.runAnimationGroup { ctx in
@@ -1726,7 +1748,9 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
                 table.reloadData(forRowIndexes: reloadRows, columnIndexes: IndexSet(integer: 0))
                 table.noteHeightOfRows(withIndexesChanged: reloadRows)
             }
+            if heightsChanged { noteAllHeightsChanged() }
             if sticky {
+                if heightsChanged { pinToDocumentEnd() }
                 scrollToBottom()
             } else {
                 restoreScrollAnchor(anchor)
@@ -3531,9 +3555,13 @@ final class BlockTableController: NSObject, NSTableViewDataSource, NSTableViewDe
 
     private func scrollToBottom() {
         guard let table, rows.count > 0 else { return }
-        DispatchQueue.main.async { [weak table] in
+        DispatchQueue.main.async { [weak self, weak table] in
             guard let table, table.numberOfRows > 0 else { return }
             table.scrollRowToVisible(table.numberOfRows - 1)
+            // A last row taller than the viewport is left showing its top, which
+            // reads as "not at bottom" and drops follow-tail before late height
+            // changes (async image rows) arrive. Land on the document end.
+            self?.pinToDocumentEnd()
         }
     }
 

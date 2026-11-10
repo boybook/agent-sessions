@@ -502,21 +502,79 @@ private struct IndexingStatusView: View {
     }
 }
 
+// Spins via a Core Animation layer animation (render server), not SwiftUI
+// repeatForever + .drawingGroup(), which re-rasterized an RBLayer on the main
+// thread every frame and blocked it in RenderBox wait_for_allocations.
 private struct IndexingIndicator: View {
     let isVisible: Bool
-    @State private var isAnimating: Bool = false
 
     var body: some View {
-        Circle()
-            .trim(from: 0.0, to: 0.75)
-            .stroke(Color.secondary, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+        IndexingSpinnerLayerView()
             .frame(width: 10, height: 10)
-            .rotationEffect(.degrees(isAnimating ? 360 : 0))
             .opacity(isVisible ? 1 : 0)
-            .animation(isVisible ? .linear(duration: 0.8).repeatForever(autoreverses: false) : .default,
-                       value: isAnimating)
-            .drawingGroup()
-            .onAppear { isAnimating = true }
+    }
+}
+
+private struct IndexingSpinnerLayerView: NSViewRepresentable {
+    func makeNSView(context: Context) -> IndexingSpinnerNSView { IndexingSpinnerNSView() }
+    func updateNSView(_ view: IndexingSpinnerNSView, context: Context) {}
+}
+
+private final class IndexingSpinnerNSView: NSView {
+    private let arc = CAShapeLayer()
+    private static let spinKey = "indexingSpin"
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.masksToBounds = false
+        arc.fillColor = nil
+        arc.lineWidth = 2
+        arc.lineCap = .round
+        arc.strokeEnd = 0.75
+        layer?.addSublayer(arc)
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func layout() {
+        super.layout()
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        arc.bounds = bounds
+        arc.position = CGPoint(x: bounds.midX, y: bounds.midY)
+        arc.path = CGPath(ellipseIn: bounds.insetBy(dx: 1, dy: 1), transform: nil)
+        CATransaction.commit()
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        updateColor()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        updateColor()
+        guard window != nil else {
+            arc.removeAnimation(forKey: Self.spinKey)
+            return
+        }
+        guard arc.animation(forKey: Self.spinKey) == nil else { return }
+        let spin = CABasicAnimation(keyPath: "transform.rotation.z")
+        spin.fromValue = 0
+        spin.toValue = -2 * Double.pi // clockwise in AppKit's unflipped space
+        spin.duration = 0.8
+        spin.repeatCount = .infinity
+        arc.add(spin, forKey: Self.spinKey)
+    }
+
+    private func updateColor() {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            arc.strokeColor = NSColor.secondaryLabelColor.cgColor
+        }
+        CATransaction.commit()
     }
 }
 

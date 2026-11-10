@@ -1204,6 +1204,13 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
 
     // Best-effort git branch detection
     public var gitBranch: String? {
+        SessionEventScanMemo.value(.gitBranch, for: self) { $0.scanGitBranch() }
+    }
+
+    // Both scans JSON-parse every event (and gitBranch regexes every output) and
+    // usually miss for Claude logs, so uncached they cost O(session bytes) per
+    // call; repoName/list rows/image browser call them per item on the main thread.
+    private func scanGitBranch() -> String? {
         // 1) explicit metadata in any event json
         for e in events {
             if let branch = extractBranch(fromRawJSON: e.rawJSON) { return branch }
@@ -1217,6 +1224,10 @@ public struct Session: Identifiable, Equatable, Codable, Sendable {
     }
 
     public var gitRepositoryURL: String? {
+        SessionEventScanMemo.value(.gitRepositoryURL, for: self) { $0.scanGitRepositoryURL() }
+    }
+
+    private func scanGitRepositoryURL() -> String? {
         for e in events {
             if let repositoryURL = extractRepositoryURL(fromRawJSON: e.rawJSON) {
                 return repositoryURL
@@ -2306,5 +2317,28 @@ extension Session {
             }
         }
         return nil
+    }
+}
+
+/// Memo for derived values that scan all of a session's events. Keyed by the
+/// session's event identity (id, count, last event id): logs are append-only, so
+/// a changed transcript always changes the key.
+private enum SessionEventScanMemo {
+    enum Field: String { case gitBranch = "b", gitRepositoryURL = "u" }
+
+    private final class Box { let value: String?; init(_ value: String?) { self.value = value } }
+    private static let cache: NSCache<NSString, Box> = {
+        let c = NSCache<NSString, Box>()
+        c.countLimit = 8192
+        return c
+    }()
+
+    static func value(_ field: Field, for session: Session, compute: (Session) -> String?) -> String? {
+        guard !session.events.isEmpty else { return compute(session) }
+        let key = "\(field.rawValue)|\(session.id)|\(session.events.count)|\(session.events.last?.id ?? "")" as NSString
+        if let hit = cache.object(forKey: key) { return hit.value }
+        let value = compute(session)
+        cache.setObject(Box(value), forKey: key)
+        return value
     }
 }

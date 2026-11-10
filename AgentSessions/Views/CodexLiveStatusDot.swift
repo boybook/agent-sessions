@@ -10,7 +10,6 @@ struct CodexLiveStatusDot: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var colorScheme
-    @State private var animatePulse: Bool = false
     @State private var isAppActive: Bool = NSApp.isActive
 
     var body: some View {
@@ -21,24 +20,14 @@ struct CodexLiveStatusDot: View {
                 animatedIdleDot
             }
         }
-        .onChange(of: state) { _, newState in
-            if newState == .openIdle {
-                updateAnimation()
-            } else {
-                stopPulseAnimation()
-            }
-        }
         .onAppear {
             isAppActive = NSApp.isActive
-            updateAnimation()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             isAppActive = true
-            updateAnimation()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
             isAppActive = false
-            stopPulseAnimation()
         }
         .accessibilityLabel(Text(accessibilityLabel))
     }
@@ -54,14 +43,6 @@ struct CodexLiveStatusDot: View {
         return colorScheme == .dark ? Color(hex: "ffb340") : Color(hex: "e08600")
     }
 
-    private var pulseScale: CGFloat {
-        animatePulse ? 1.25 : 1.0
-    }
-
-    private var pulseOpacity: Double {
-        return animatePulse ? 1.0 : 0.88
-    }
-
     private var staticActiveDot: some View {
         Circle()
             .fill(color)
@@ -72,46 +53,14 @@ struct CodexLiveStatusDot: View {
             }
     }
 
+    // Pulse runs as a Core Animation layer animation on the render server.
+    // SwiftUI repeatForever + .drawingGroup() re-rasterized an RBLayer every
+    // frame on the main thread, and each re-rasterize blocked in RenderBox
+    // wait_for_allocations until the previous frame was displayed: one idle dot
+    // kept ~50% of the main thread waiting, so clicks queued behind it.
     private var animatedIdleDot: some View {
-        Circle()
-            .fill(idleBaseColor)
+        PulsingDotLayerView(color: NSColor(idleBaseColor), pulsing: shouldPulse)
             .frame(width: size, height: size)
-            .scaleEffect(pulseScale)
-            .opacity(pulseOpacity)
-            .shadow(color: idleBaseColor.opacity(haloOpacity), radius: haloRadius)
-            .drawingGroup()
-            .onChange(of: lastSeenAt) { _, _ in updateAnimation() }
-            .onChange(of: reduceMotion) { _, _ in updateAnimation() }
-            .onChange(of: isAppActive) { _, _ in updateAnimation() }
-    }
-
-    private var haloOpacity: Double {
-        guard shouldPulse else { return 0 }
-        return animatePulse ? 0.65 : 0.22
-    }
-
-    private var haloRadius: CGFloat {
-        guard shouldPulse else { return 0 }
-        return animatePulse ? 4.8 : 3.2
-    }
-
-    private func updateAnimation() {
-        guard shouldPulse else {
-            stopPulseAnimation()
-            return
-        }
-        animatePulse = false
-        withAnimation(.easeInOut(duration: 1.4).repeatForever(autoreverses: true)) {
-            animatePulse = true
-        }
-    }
-
-    private func stopPulseAnimation() {
-        var transaction = Transaction()
-        transaction.disablesAnimations = true
-        withTransaction(transaction) {
-            animatePulse = false
-        }
     }
 
     private var accessibilityLabel: String {
@@ -119,5 +68,87 @@ struct CodexLiveStatusDot: View {
         case .activeWorking: return "Active session"
         case .openIdle: return idleReason?.label ?? "Open session"
         }
+    }
+}
+
+/// Idle-dot pulse (scale 1→1.25, opacity 0.88→1, halo 0.22/3.2→0.65/4.8,
+/// easeInOut 1.4s, autoreversing) driven entirely by Core Animation.
+private struct PulsingDotLayerView: NSViewRepresentable {
+    let color: NSColor
+    let pulsing: Bool
+
+    func makeNSView(context: Context) -> PulsingDotNSView { PulsingDotNSView() }
+
+    func updateNSView(_ view: PulsingDotNSView, context: Context) {
+        view.apply(color: color, pulsing: pulsing)
+    }
+}
+
+private final class PulsingDotNSView: NSView {
+    private let dot = CALayer()
+    private var pulsing = false
+    private static let pulseKey = "idlePulse"
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.masksToBounds = false
+        dot.opacity = 0.88
+        dot.shadowOffset = .zero
+        dot.shadowOpacity = 0
+        layer?.addSublayer(dot)
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func layout() {
+        super.layout()
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        dot.bounds = bounds
+        dot.position = CGPoint(x: bounds.midX, y: bounds.midY)
+        dot.cornerRadius = min(bounds.width, bounds.height) / 2
+        CATransaction.commit()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        syncAnimation()
+    }
+
+    func apply(color: NSColor, pulsing: Bool) {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        dot.backgroundColor = color.cgColor
+        dot.shadowColor = color.cgColor
+        CATransaction.commit()
+        self.pulsing = pulsing
+        syncAnimation()
+    }
+
+    private func syncAnimation() {
+        guard pulsing, window != nil else {
+            dot.removeAnimation(forKey: Self.pulseKey)
+            return
+        }
+        guard dot.animation(forKey: Self.pulseKey) == nil else { return }
+        func anim(_ keyPath: String, _ from: Any, _ to: Any) -> CABasicAnimation {
+            let a = CABasicAnimation(keyPath: keyPath)
+            a.fromValue = from
+            a.toValue = to
+            return a
+        }
+        let group = CAAnimationGroup()
+        group.animations = [
+            anim("transform.scale", 1.0, 1.25),
+            anim("opacity", 0.88, 1.0),
+            anim("shadowOpacity", 0.22, 0.65),
+            anim("shadowRadius", 3.2, 4.8),
+        ]
+        group.duration = 1.4
+        group.autoreverses = true
+        group.repeatCount = .infinity
+        group.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        dot.add(group, forKey: Self.pulseKey)
     }
 }
