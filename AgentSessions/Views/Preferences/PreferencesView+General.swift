@@ -92,6 +92,26 @@ extension PreferencesView {
 
     var agentCockpitTab: some View {
         PreferencesForm {
+            Section {
+                // The same show/hide as View → Quota Meter. Hiding is always allowed;
+                // showing needs live session detection, which feeds the meter.
+                Toggle(isOn: Binding(
+                    get: { quotaMeterVisibility.isVisible },
+                    set: { shouldShow in
+                        QuotaMeterPresentationCoordinator.shared.setQuotaMeterVisible(shouldShow)
+                        quotaMeterVisibility.refresh()
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { quotaMeterVisibility.refresh() }
+                    }
+                )) {
+                    Text("Show Quota Meter")
+                    if !codexActiveSessionsEnabled {
+                        Text("Enable live session detection (Beta) in Settings → Quota Meter.")
+                    }
+                }
+                .disabled(!codexActiveSessionsEnabled && !quotaMeterVisibility.isVisible)
+                .help("Show or hide the Quota Meter.")
+            }
+
             Section("Appearance") {
                 Toggle(isOn: $cockpitReduceTransparency) {
                     Text("Reduce transparency")

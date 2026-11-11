@@ -609,7 +609,8 @@ private struct AgentCockpitMenu: View {
             }
         ))
         .keyboardShortcut("c", modifiers: [.command, .option, .shift])
-        .disabled(!liveSessionsFeatureEnabled)
+        // Hiding is always allowed, so a visible meter can be closed with live detection off.
+        .disabled(!liveSessionsFeatureEnabled && !visibility.isVisible)
         .help(
             liveSessionsFeatureEnabled
                 ? "Show or hide the Quota Meter."

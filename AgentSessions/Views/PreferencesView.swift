@@ -34,6 +34,7 @@ struct PreferencesView: View {
     @AppStorage(PreferencesKey.Cockpit.codexActiveSessionsEnabled) var codexActiveSessionsEnabled: Bool = true
     @AppStorage(PreferencesKey.Cockpit.codexActiveRegistryRootOverride) var codexActiveRegistryRootOverride: String = ""
     @AppStorage(PreferencesKey.Cockpit.hudReduceTransparency) var cockpitReduceTransparency: Bool = true
+    @ObservedObject var quotaMeterVisibility = CockpitWindowVisibility.shared
     // Codex probe cleanup prefs
     @AppStorage(PreferencesKey.codexProbeCleanupMode) var codexProbeCleanupMode: String = "none" // none | auto
     @State var showConfirmCodexAutoDelete: Bool = false
