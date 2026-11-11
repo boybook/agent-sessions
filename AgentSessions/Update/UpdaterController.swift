@@ -59,7 +59,8 @@ final class UpdaterController: NSObject, ObservableObject, SPUUpdaterDelegate, S
             guard let self = self, let controller = self.controller else { return }
             do {
                 try controller.updater.start()
-                // Background check later
+                // Background check later, unless the user turned automatic checks off
+                guard controller.updater.automaticallyChecksForUpdates else { return }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) {
                     controller.updater.checkForUpdatesInBackground()
                 }
