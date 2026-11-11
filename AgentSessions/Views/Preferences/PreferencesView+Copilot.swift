@@ -3,150 +3,137 @@ import AppKit
 
 extension PreferencesView {
     var copilotCLITab: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            Text("GitHub Copilot CLI").font(.title2).fontWeight(.semibold)
-
+        PreferencesForm {
             if !copilotAgentEnabled {
-                PreferenceCallout {
-                    Text("This agent is disabled in General → Active CLI agents.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            Group {
-                sectionHeader("GitHub Copilot CLI Binary")
-                VStack(alignment: .leading, spacing: 10) {
-                    labeledRow("Binary Source") {
-                        Picker("", selection: Binding(
-                            get: { copilotSettings.binaryPath.isEmpty ? 0 : 1 },
-                            set: { idx in
-                                if idx == 0 {
-                                    copilotSettings.setBinaryPath("")
-                                    scheduleCopilotProbe()
-                                } else {
-                                    pickCopilotBinary()
-                                }
-                            }
-                        )) {
-                            Text("Auto").tag(0)
-                            Text("Custom").tag(1)
-                        }
-                        .pickerStyle(.segmented)
-                        .frame(maxWidth: 220)
-                        .help("Use the auto-detected Copilot CLI or supply a custom path")
-                    }
-
-                    if copilotSettings.binaryPath.isEmpty {
-                        HStack {
-                            Text("Detected:").font(.caption)
-                            Text(copilotVersionString ?? "unknown").font(.caption).monospaced()
-                        }
-                        if let path = copilotResolvedPath {
-                            Text(path).font(.caption2).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
-                        }
-
-                        if copilotProbeState == .failure && copilotVersionString == nil {
-                            PreferenceCallout {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("GitHub Copilot CLI not found")
-                                        .font(.caption)
-                                        .fontWeight(.medium)
-                                    Text("Install via Homebrew or download from GitHub Copilot CLI releases.")
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                        }
-
-                        HStack(spacing: 12) {
-                            Button("Check Version") { probeCopilot() }
-                                .buttonStyle(.bordered)
-                                .help("Query the detected Copilot CLI for its version")
-                            Button(agentUpdateButtonTitle(for: .copilot)) { runAgentUpdateFlow(for: .copilot) }
-                                .buttonStyle(.bordered)
-                                .help("Check for a newer GitHub Copilot CLI version and optionally update it")
-                                .disabled(isAgentUpdateBusy(.copilot))
-                            Button("Copy Path") {
-                                if let p = copilotResolvedPath {
-                                    NSPasteboard.general.clearContents()
-                                    NSPasteboard.general.setString(p, forType: .string)
-                                }
-                            }
-                            .buttonStyle(.bordered)
-                            .help("Copy the detected Copilot CLI path to clipboard")
-                            .disabled(copilotResolvedPath == nil)
-                            Button("Reveal") {
-                                if let p = copilotResolvedPath {
-                                    NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: p)])
-                                }
-                            }
-                            .buttonStyle(.bordered)
-                            .help("Reveal the detected Copilot CLI binary in Finder")
-                            .disabled(copilotResolvedPath == nil)
-                        }
-                    } else {
-                        HStack(spacing: 10) {
-                            TextField("/path/to/copilot", text: Binding(get: { copilotSettings.binaryPath }, set: { copilotSettings.setBinaryPath($0) }))
-                                .textFieldStyle(.roundedBorder)
-                                .frame(maxWidth: 360)
-                                .onSubmit { scheduleCopilotProbe() }
-                                .onChange(of: copilotSettings.binaryPath) { _, _ in scheduleCopilotProbe() }
-                                .help("Enter the full path to a custom GitHub Copilot CLI binary")
-                            Button("Choose…", action: pickCopilotBinary)
-                                .buttonStyle(.borderedProminent)
-                                .help("Select the GitHub Copilot CLI binary from the filesystem")
-                        }
-                        if !copilotSettings.binaryPath.isEmpty, copilotProbeState == .failure {
-                            Text("Invalid Copilot binary path.")
-                                .font(.caption)
-                                .foregroundStyle(.red)
-                        }
-                    }
-                }
-
-                sectionHeader("Sessions Folder")
-                    .padding(.top, 6)
-                VStack(alignment: .leading, spacing: 8) {
-                    labeledRow("Storage Root") {
-                        HStack(spacing: 10) {
-                            TextField("~/.copilot/session-state", text: $copilotSessionsPath)
-                                .textFieldStyle(.roundedBorder)
-                                .frame(maxWidth: 360)
-                                .onSubmit {
-                                    validateCopilotSessionsPath()
-                                    commitCopilotSessionsPathIfValid()
-                                }
-                                .onChange(of: copilotSessionsPath) { _, _ in
-                                    copilotSessionsPathDebounce?.cancel()
-                                    let work = DispatchWorkItem {
-                                        validateCopilotSessionsPath()
-                                        commitCopilotSessionsPathIfValid()
-                                    }
-                                    copilotSessionsPathDebounce = work
-                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
-                                }
-                                .help("Override where Agent Sessions scans for Copilot session-state JSONL files")
-                            Button("Choose…", action: pickCopilotSessionsFolder)
-                                .buttonStyle(.borderedProminent)
-                                .help("Pick a folder to scan for Copilot sessions")
-                        }
-                    }
-
-                    if !copilotSessionsPathValid {
-                        Text("Folder does not exist or is not a directory.")
-                            .font(.caption)
-                            .foregroundStyle(.red)
-                    } else {
-                        Text("Default: ~/.copilot/session-state")
+                Section {
+                    PreferenceCallout {
+                        Text("This agent is disabled in General → Active CLI agents.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
                 }
             }
+
+            Section("GitHub Copilot CLI Binary") {
+                Picker("Binary Source", selection: Binding(
+                    get: { copilotSettings.binaryPath.isEmpty ? 0 : 1 },
+                    set: { idx in
+                        if idx == 0 {
+                            copilotSettings.setBinaryPath("")
+                            scheduleCopilotProbe()
+                        } else {
+                            pickCopilotBinary()
+                        }
+                    }
+                )) {
+                    Text("Auto").tag(0)
+                    Text("Custom").tag(1)
+                }
+                .pickerStyle(.segmented)
+                .help("Use the auto-detected Copilot CLI or supply a custom path")
+
+                if copilotSettings.binaryPath.isEmpty {
+                    LabeledContent {
+                        Text(copilotVersionString ?? "unknown").monospaced()
+                    } label: {
+                        Text("Detected:")
+                        if let path = copilotResolvedPath {
+                            Text(path).lineLimit(1).truncationMode(.middle)
+                        }
+                    }
+
+                    if copilotProbeState == .failure && copilotVersionString == nil {
+                        PreferenceCallout {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("GitHub Copilot CLI not found")
+                                    .font(.caption)
+                                    .fontWeight(.medium)
+                                Text("Install via Homebrew or download from GitHub Copilot CLI releases.")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+
+                    HStack {
+                        Spacer()
+                        Button("Check Version") { probeCopilot() }
+                            .help("Query the detected Copilot CLI for its version")
+                        Button(agentUpdateButtonTitle(for: .copilot)) { runAgentUpdateFlow(for: .copilot) }
+                            .help("Check for a newer GitHub Copilot CLI version and optionally update it")
+                            .disabled(isAgentUpdateBusy(.copilot))
+                        Button("Copy Path") {
+                            if let p = copilotResolvedPath {
+                                NSPasteboard.general.clearContents()
+                                NSPasteboard.general.setString(p, forType: .string)
+                            }
+                        }
+                        .help("Copy the detected Copilot CLI path to clipboard")
+                        .disabled(copilotResolvedPath == nil)
+                        Button("Reveal") {
+                            if let p = copilotResolvedPath {
+                                NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: p)])
+                            }
+                        }
+                        .help("Reveal the detected Copilot CLI binary in Finder")
+                        .disabled(copilotResolvedPath == nil)
+                    }
+                } else {
+                    HStack(spacing: 8) {
+                        TextField("/path/to/copilot", text: Binding(get: { copilotSettings.binaryPath }, set: { copilotSettings.setBinaryPath($0) }),
+                                  prompt: Text("/path/to/copilot"))
+                            .labelsHidden()
+                            .textFieldStyle(.roundedBorder)
+                            .onSubmit { scheduleCopilotProbe() }
+                            .onChange(of: copilotSettings.binaryPath) { _, _ in scheduleCopilotProbe() }
+                            .help("Enter the full path to a custom GitHub Copilot CLI binary")
+                        Button("Choose…", action: pickCopilotBinary)
+                            .help("Select the GitHub Copilot CLI binary from the filesystem")
+                    }
+                    if !copilotSettings.binaryPath.isEmpty, copilotProbeState == .failure {
+                        Text("Invalid Copilot binary path.")
+                            .foregroundStyle(.red)
+                    }
+                }
+            }
             .disabled(!copilotAgentEnabled)
 
-            Spacer()
+            Section("Sessions Folder") {
+                LabeledContent {
+                    HStack(spacing: 8) {
+                        TextField("Storage Root", text: $copilotSessionsPath, prompt: Text("~/.copilot/session-state"))
+                            .labelsHidden()
+                            .textFieldStyle(.roundedBorder)
+                            .onSubmit {
+                                validateCopilotSessionsPath()
+                                commitCopilotSessionsPathIfValid()
+                            }
+                            .onChange(of: copilotSessionsPath) { _, _ in
+                                copilotSessionsPathDebounce?.cancel()
+                                let work = DispatchWorkItem {
+                                    validateCopilotSessionsPath()
+                                    commitCopilotSessionsPathIfValid()
+                                }
+                                copilotSessionsPathDebounce = work
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
+                            }
+                            .help("Override where Agent Sessions scans for Copilot session-state JSONL files")
+                        Button("Choose…", action: pickCopilotSessionsFolder)
+                            .help("Pick a folder to scan for Copilot sessions")
+                    }
+                } label: {
+                    Text("Storage Root")
+                    if copilotSessionsPathValid {
+                        Text("Default: ~/.copilot/session-state")
+                    }
+                }
+
+                if !copilotSessionsPathValid {
+                    Text("Folder does not exist or is not a directory.")
+                        .foregroundStyle(.red)
+                }
+            }
+            .disabled(!copilotAgentEnabled)
         }
         .onAppear {
             scheduleCopilotProbe()

@@ -3,158 +3,144 @@ import AppKit
 
 extension PreferencesView {
     var fxTab: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            Text("fx").font(.title2).fontWeight(.semibold)
-
+        PreferencesForm {
             if !fxAgentEnabled {
-                PreferenceCallout {
-                    Text("This agent is disabled in General -> Active CLI agents.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            Group {
-                sectionHeader("fx CLI Binary")
-                VStack(alignment: .leading, spacing: 10) {
-                    labeledRow("Binary Source") {
-                        Picker("", selection: Binding(
-                            get: { fxSettings.binaryPath.isEmpty ? 0 : 1 },
-                            set: { idx in
-                                if idx == 0 {
-                                    fxSettings.setBinaryPath("")
-                                    scheduleFxProbe()
-                                } else {
-                                    pickFxBinary()
-                                }
-                            }
-                        )) {
-                            Text("Auto").tag(0)
-                            Text("Custom").tag(1)
-                        }
-                        .pickerStyle(.segmented)
-                        .frame(maxWidth: 220)
-                        .help("Use the auto-detected fx CLI or supply a custom path")
-                    }
-
-                    if fxSettings.binaryPath.isEmpty {
-                        HStack {
-                            Text("Detected:").font(.caption)
-                            Text(fxVersionString ?? "unknown").font(.caption).monospaced()
-                        }
-                        if let path = fxResolvedPath {
-                            Text(path).font(.caption2).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
-                        }
-
-                        if fxProbeState == .failure && fxVersionString == nil {
-                            PreferenceCallout {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("fx CLI not found")
-                                        .font(.caption)
-                                        .fontWeight(.medium)
-                                    Text("Install it from fx.sh and ensure `fx` is on PATH.")
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                        }
-
-                        HStack(spacing: 12) {
-                            Button("Check Version") { probeFx() }
-                                .buttonStyle(.bordered)
-                                .help("Query the detected fx CLI for its version")
-                            Button("Copy Path") {
-                                if let p = fxResolvedPath {
-                                    NSPasteboard.general.clearContents()
-                                    NSPasteboard.general.setString(p, forType: .string)
-                                }
-                            }
-                            .buttonStyle(.bordered)
-                            .help("Copy the detected fx CLI path to clipboard")
-                            .disabled(fxResolvedPath == nil)
-                            Button("Reveal") {
-                                if let p = fxResolvedPath {
-                                    NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: p)])
-                                }
-                            }
-                            .buttonStyle(.bordered)
-                            .help("Reveal the detected fx CLI binary in Finder")
-                            .disabled(fxResolvedPath == nil)
-                        }
-                    } else {
-                        HStack(spacing: 10) {
-                            TextField("/path/to/fx", text: Binding(get: { fxSettings.binaryPath }, set: { fxSettings.setBinaryPath($0) }))
-                                .textFieldStyle(.roundedBorder)
-                                .frame(maxWidth: 360)
-                                .onSubmit { scheduleFxProbe() }
-                                .onChange(of: fxSettings.binaryPath) { _, _ in scheduleFxProbe() }
-                                .help("Enter the full path to a custom fx CLI binary")
-                            Button("Choose...", action: pickFxBinary)
-                                .buttonStyle(.borderedProminent)
-                                .help("Select the fx CLI binary from the filesystem")
-                        }
-                        if !fxSettings.binaryPath.isEmpty, fxProbeState == .failure {
-                            Text("Invalid fx binary path.")
-                                .font(.caption)
-                                .foregroundStyle(.red)
-                        }
-                    }
-
-                    Text("Used for both the copied resume command and Resume in Terminal. fx resumes by session id (`--resume`), falling back to `--continue` for the latest session in the workspace.")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-
-                sectionHeader("Sessions Storage")
-                VStack(alignment: .leading, spacing: 10) {
-                    labeledRow("Status") {
-                        let status = AgentEnablement.availabilityStatus(for: .fx)
-                        HStack(spacing: 4) {
-                            Image(systemName: status.isAvailable ? "checkmark.circle.fill" : "xmark.circle")
-                                .foregroundColor(status.isAvailable ? .green : .secondary)
-                            Text(status.statusText)
-                                .font(.caption)
-                        }
-                    }
-
-                    labeledRow("Default Root") {
-                        Text("~/.fx/sessions")
+                Section {
+                    PreferenceCallout {
+                        Text("This agent is disabled in General -> Active CLI agents.")
                             .font(.caption)
-                            .monospaced()
                             .foregroundStyle(.secondary)
                     }
-
-                    labeledRow("Storage Root") {
-                        HStack(spacing: 10) {
-                            TextField("Custom root (leave empty for default)", text: $fxSessionsPath)
-                                .textFieldStyle(.roundedBorder)
-                                .font(.caption)
-                                .onSubmit {
-                                    validateFxSessionsPath()
-                                    commitFxSessionsPathIfValid()
-                                }
-                                .onChange(of: fxSessionsPath) { _, _ in
-                                    scheduleFxSessionsPathValidation()
-                                }
-                            Button("Choose...", action: pickFxSessionsFolder)
-                                .buttonStyle(.borderedProminent)
-                                .help("Select an fx sessions directory")
-                        }
-                    }
-
-                    if !fxSessionsPathValid {
-                        Text("Choose an existing directory.")
-                            .font(.caption)
-                            .foregroundStyle(.red)
-                    }
-
-                    Text("fx writes one directory per session under its sessions root, holding checkpoint.json (the conversation) beside session.json. Override only when that data lives outside the default location; the root may point at the sessions directory or the .fx data directory itself.")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
                 }
             }
 
-            Spacer()
+            Section {
+                Picker("Binary Source", selection: Binding(
+                    get: { fxSettings.binaryPath.isEmpty ? 0 : 1 },
+                    set: { idx in
+                        if idx == 0 {
+                            fxSettings.setBinaryPath("")
+                            scheduleFxProbe()
+                        } else {
+                            pickFxBinary()
+                        }
+                    }
+                )) {
+                    Text("Auto").tag(0)
+                    Text("Custom").tag(1)
+                }
+                .pickerStyle(.segmented)
+                .help("Use the auto-detected fx CLI or supply a custom path")
+
+                if fxSettings.binaryPath.isEmpty {
+                    LabeledContent("Detected:") {
+                        Text(fxVersionString ?? "unknown").monospaced()
+                    }
+                    if let path = fxResolvedPath {
+                        LabeledContent("Resolved Path") {
+                            Text(path).lineLimit(1).truncationMode(.middle)
+                        }
+                    }
+
+                    if fxProbeState == .failure && fxVersionString == nil {
+                        PreferenceCallout {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("fx CLI not found")
+                                    .font(.caption)
+                                    .fontWeight(.medium)
+                                Text("Install it from fx.sh and ensure `fx` is on PATH.")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+
+                    HStack {
+                        Spacer()
+                        Button("Check Version") { probeFx() }
+                            .help("Query the detected fx CLI for its version")
+                        Button("Copy Path") {
+                            if let p = fxResolvedPath {
+                                NSPasteboard.general.clearContents()
+                                NSPasteboard.general.setString(p, forType: .string)
+                            }
+                        }
+                        .help("Copy the detected fx CLI path to clipboard")
+                        .disabled(fxResolvedPath == nil)
+                        Button("Reveal") {
+                            if let p = fxResolvedPath {
+                                NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: p)])
+                            }
+                        }
+                        .help("Reveal the detected fx CLI binary in Finder")
+                        .disabled(fxResolvedPath == nil)
+                    }
+                } else {
+                    HStack(spacing: 8) {
+                        TextField("/path/to/fx", text: Binding(get: { fxSettings.binaryPath }, set: { fxSettings.setBinaryPath($0) }),
+                                  prompt: Text("/path/to/fx"))
+                            .labelsHidden()
+                            .textFieldStyle(.roundedBorder)
+                            .onSubmit { scheduleFxProbe() }
+                            .onChange(of: fxSettings.binaryPath) { _, _ in scheduleFxProbe() }
+                            .help("Enter the full path to a custom fx CLI binary")
+                        Button("Choose...", action: pickFxBinary)
+                            .help("Select the fx CLI binary from the filesystem")
+                    }
+                    if !fxSettings.binaryPath.isEmpty, fxProbeState == .failure {
+                        Text("Invalid fx binary path.")
+                            .foregroundStyle(.red)
+                    }
+                }
+            } header: {
+                Text("fx CLI Binary")
+            } footer: {
+                Text("Used for both the copied resume command and Resume in Terminal. fx resumes by session id (`--resume`), falling back to `--continue` for the latest session in the workspace.")
+            }
+
+            Section {
+                LabeledContent("Status") {
+                    let status = AgentEnablement.availabilityStatus(for: .fx)
+                    HStack(spacing: 4) {
+                        Image(systemName: status.isAvailable ? "checkmark.circle.fill" : "xmark.circle")
+                            .foregroundColor(status.isAvailable ? .green : .secondary)
+                        Text(status.statusText)
+                    }
+                }
+
+                LabeledContent("Default Root") {
+                    Text("~/.fx/sessions")
+                        .monospaced()
+                }
+
+                LabeledContent {
+                    HStack(spacing: 8) {
+                        TextField("Storage Root", text: $fxSessionsPath, prompt: Text("Custom root (leave empty for default)"))
+                            .labelsHidden()
+                            .textFieldStyle(.roundedBorder)
+                            .onSubmit {
+                                validateFxSessionsPath()
+                                commitFxSessionsPathIfValid()
+                            }
+                            .onChange(of: fxSessionsPath) { _, _ in
+                                scheduleFxSessionsPathValidation()
+                            }
+                        Button("Choose...", action: pickFxSessionsFolder)
+                            .help("Select an fx sessions directory")
+                    }
+                } label: {
+                    Text("Storage Root")
+                }
+
+                if !fxSessionsPathValid {
+                    Text("Choose an existing directory.")
+                        .foregroundStyle(.red)
+                }
+            } header: {
+                Text("Sessions Storage")
+            } footer: {
+                Text("fx writes one directory per session under its sessions root, holding checkpoint.json (the conversation) beside session.json. Override only when that data lives outside the default location; the root may point at the sessions directory or the .fx data directory itself.")
+            }
         }
         .onAppear {
             scheduleFxProbe()

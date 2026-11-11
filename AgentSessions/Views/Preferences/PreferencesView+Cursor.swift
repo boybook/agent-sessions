@@ -3,154 +3,136 @@ import AppKit
 
 extension PreferencesView {
     var cursorTab: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            Text("Cursor").font(.title2).fontWeight(.semibold)
-
+        PreferencesForm {
             if !cursorAgentEnabled {
-                PreferenceCallout {
-                    Text("This agent is disabled in General → Active CLI agents.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                Section {
+                    PreferenceCallout {
+                        Text("This agent is disabled in General → Active CLI agents.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
 
-            Group {
-                sectionHeader("Cursor CLI Binary")
-                VStack(alignment: .leading, spacing: 10) {
-                    labeledRow("Binary Source") {
-                        Picker("", selection: Binding(
-                            get: { cursorSettings.binaryPath.isEmpty ? 0 : 1 },
-                            set: { idx in
-                                if idx == 0 {
-                                    cursorSettings.setBinaryPath("")
-                                    scheduleCursorProbe()
-                                } else {
-                                    pickCursorBinary()
-                                }
-                            }
-                        )) {
-                            Text("Auto").tag(0)
-                            Text("Custom").tag(1)
+            Section("Cursor CLI Binary") {
+                Picker("Binary Source", selection: Binding(
+                    get: { cursorSettings.binaryPath.isEmpty ? 0 : 1 },
+                    set: { idx in
+                        if idx == 0 {
+                            cursorSettings.setBinaryPath("")
+                            scheduleCursorProbe()
+                        } else {
+                            pickCursorBinary()
                         }
-                        .pickerStyle(.segmented)
-                        .frame(maxWidth: 220)
-                        .help("Use the auto-detected Cursor CLI or supply a custom path")
                     }
+                )) {
+                    Text("Auto").tag(0)
+                    Text("Custom").tag(1)
+                }
+                .pickerStyle(.segmented)
+                .help("Use the auto-detected Cursor CLI or supply a custom path")
 
-                    if cursorSettings.binaryPath.isEmpty {
-                        HStack {
-                            Text("Detected:").font(.caption)
-                            Text(cursorVersionString ?? "unknown").font(.caption).monospaced()
-                        }
+                if cursorSettings.binaryPath.isEmpty {
+                    LabeledContent {
+                        Text(cursorVersionString ?? "unknown").monospaced()
+                    } label: {
+                        Text("Detected:")
                         if let path = cursorResolvedPath {
-                            Text(path).font(.caption2).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                            Text(path).lineLimit(1).truncationMode(.middle)
                         }
+                    }
 
-                        if cursorProbeState == .failure && cursorVersionString == nil {
-                            PreferenceCallout {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("Cursor CLI not found")
-                                        .font(.caption)
-                                        .fontWeight(.medium)
-                                    Text("Install Cursor Agent from cursor.com/download and ensure `cursor` is on PATH.")
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                }
+                    if cursorProbeState == .failure && cursorVersionString == nil {
+                        PreferenceCallout {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Cursor CLI not found")
+                                    .font(.caption)
+                                    .fontWeight(.medium)
+                                Text("Install Cursor Agent from cursor.com/download and ensure `cursor` is on PATH.")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
                             }
                         }
+                    }
 
-                        HStack(spacing: 12) {
-                            Button("Check Version") { probeCursor() }
-                                .buttonStyle(.bordered)
-                                .help("Query the detected Cursor CLI for its version")
-                            Button("Copy Path") {
-                                if let p = cursorResolvedPath {
-                                    NSPasteboard.general.clearContents()
-                                    NSPasteboard.general.setString(p, forType: .string)
-                                }
+                    HStack {
+                        Spacer()
+                        Button("Check Version") { probeCursor() }
+                            .help("Query the detected Cursor CLI for its version")
+                        Button("Copy Path") {
+                            if let p = cursorResolvedPath {
+                                NSPasteboard.general.clearContents()
+                                NSPasteboard.general.setString(p, forType: .string)
                             }
-                            .buttonStyle(.bordered)
-                            .help("Copy the detected Cursor CLI path to clipboard")
-                            .disabled(cursorResolvedPath == nil)
-                            Button("Reveal") {
-                                if let p = cursorResolvedPath {
-                                    NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: p)])
-                                }
+                        }
+                        .help("Copy the detected Cursor CLI path to clipboard")
+                        .disabled(cursorResolvedPath == nil)
+                        Button("Reveal") {
+                            if let p = cursorResolvedPath {
+                                NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: p)])
                             }
-                            .buttonStyle(.bordered)
-                            .help("Reveal the detected Cursor CLI binary in Finder")
-                            .disabled(cursorResolvedPath == nil)
                         }
-                    } else {
-                        HStack(spacing: 10) {
-                            TextField("/path/to/agent", text: Binding(get: { cursorSettings.binaryPath }, set: { cursorSettings.setBinaryPath($0) }))
-                                .textFieldStyle(.roundedBorder)
-                                .frame(maxWidth: 360)
-                                .onSubmit { scheduleCursorProbe() }
-                                .onChange(of: cursorSettings.binaryPath) { _, _ in scheduleCursorProbe() }
-                                .help("Enter the full path to a custom Cursor CLI binary")
-                            Button("Choose…", action: pickCursorBinary)
-                                .buttonStyle(.borderedProminent)
-                                .help("Select the Cursor CLI binary from the filesystem")
-                        }
-                        if !cursorSettings.binaryPath.isEmpty, cursorProbeState == .failure {
-                            Text("Invalid Cursor binary path.")
-                                .font(.caption)
-                                .foregroundStyle(.red)
-                        }
+                        .help("Reveal the detected Cursor CLI binary in Finder")
+                        .disabled(cursorResolvedPath == nil)
                     }
-                }
-
-                sectionHeader("Sessions Storage")
-                VStack(alignment: .leading, spacing: 10) {
-                    labeledRow("Status") {
-                        let status = AgentEnablement.availabilityStatus(for: .cursor)
-                        HStack(spacing: 4) {
-                            Image(systemName: status.isAvailable ? "checkmark.circle.fill" : "xmark.circle")
-                                .foregroundColor(status.isAvailable ? .green : .secondary)
-                            Text(status.statusText)
-                                .font(.caption)
-                        }
+                } else {
+                    HStack(spacing: 8) {
+                        TextField("/path/to/agent", text: Binding(get: { cursorSettings.binaryPath }, set: { cursorSettings.setBinaryPath($0) }),
+                                  prompt: Text("/path/to/agent"))
+                            .labelsHidden()
+                            .textFieldStyle(.roundedBorder)
+                            .onSubmit { scheduleCursorProbe() }
+                            .onChange(of: cursorSettings.binaryPath) { _, _ in scheduleCursorProbe() }
+                            .help("Enter the full path to a custom Cursor CLI binary")
+                        Button("Choose…", action: pickCursorBinary)
+                            .help("Select the Cursor CLI binary from the filesystem")
                     }
-
-                    labeledRow("Storage Root") {
-                        Text("~/.cursor")
-                            .font(.caption)
-                            .monospaced()
-                            .foregroundStyle(.secondary)
+                    if !cursorSettings.binaryPath.isEmpty, cursorProbeState == .failure {
+                        Text("Invalid Cursor binary path.")
+                            .foregroundStyle(.red)
                     }
-
-                    labeledRow("Transcripts") {
-                        Text("~/.cursor/projects/*/agent-transcripts/")
-                            .font(.caption2)
-                            .monospaced()
-                            .foregroundStyle(.secondary)
-                    }
-
-                    labeledRow("Chat Metadata") {
-                        Text("~/.cursor/chats/*/*/store.db")
-                            .font(.caption2)
-                            .monospaced()
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                sectionHeader("Custom Root Override")
-                VStack(alignment: .leading, spacing: 6) {
-                    @AppStorage(PreferencesKey.Paths.cursorSessionsRootOverride) var cursorRootOverride: String = ""
-
-                    TextField("Custom root (leave empty for default)", text: $cursorRootOverride)
-                        .textFieldStyle(.roundedBorder)
-                        .font(.caption)
-
-                    Text("Override the default ~/.cursor path. Most users should leave this empty.")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
                 }
             }
             .disabled(!cursorAgentEnabled)
 
-            Spacer()
+            Section("Sessions Storage") {
+                LabeledContent("Status") {
+                    let status = AgentEnablement.availabilityStatus(for: .cursor)
+                    HStack(spacing: 4) {
+                        Image(systemName: status.isAvailable ? "checkmark.circle.fill" : "xmark.circle")
+                            .foregroundColor(status.isAvailable ? .green : .secondary)
+                        Text(status.statusText)
+                    }
+                }
+
+                LabeledContent("Storage Root") {
+                    Text("~/.cursor")
+                        .monospaced()
+                }
+
+                LabeledContent("Transcripts") {
+                    Text("~/.cursor/projects/*/agent-transcripts/")
+                        .monospaced()
+                }
+
+                LabeledContent("Chat Metadata") {
+                    Text("~/.cursor/chats/*/*/store.db")
+                        .monospaced()
+                }
+            }
+            .disabled(!cursorAgentEnabled)
+
+            Section {
+                @AppStorage(PreferencesKey.Paths.cursorSessionsRootOverride) var cursorRootOverride: String = ""
+
+                TextField("Storage Root", text: $cursorRootOverride, prompt: Text("Custom root (leave empty for default)"))
+                    .textFieldStyle(.roundedBorder)
+            } header: {
+                Text("Custom Root Override")
+            } footer: {
+                Text("Override the default ~/.cursor path. Most users should leave this empty.")
+            }
+            .disabled(!cursorAgentEnabled)
         }
         .onAppear {
             scheduleCursorProbe()

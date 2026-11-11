@@ -4,26 +4,21 @@ import AppKit
 extension PreferencesView {
 
     var aboutTab: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            Text("About")
-                .font(.title2)
-                .fontWeight(.semibold)
-
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 8) {
+        PreferencesForm {
+            Section {
+                VStack(spacing: 8) {
                     if let appIcon = NSImage(named: NSImage.applicationIconName) {
                         Image(nsImage: appIcon)
                             .resizable()
-                            .frame(width: 16, height: 16)
-                            .cornerRadius(3)
+                            .frame(width: 64, height: 64)
                     }
                     Text("Agent Sessions")
-                        .font(.headline)
+                        .font(.title3)
                         .fontWeight(.semibold)
                 }
-                Divider()
-            }
-            VStack(alignment: .leading, spacing: 12) {
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+
                 labeledRow("Version:") {
                     if let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String {
                         Text(version)
@@ -70,8 +65,7 @@ extension PreferencesView {
                 }
             }
 
-            sectionHeader("Updates")
-            VStack(alignment: .leading, spacing: 12) {
+            Section("Updates") {
                 if updaterController.hasGentleReminder {
                     PreferenceCallout(
                         iconName: "exclamationmark.circle.fill",
@@ -84,25 +78,24 @@ extension PreferencesView {
                     }
                 }
 
-                HStack(spacing: 12) {
-                    Toggle("Auto-Update", isOn: Binding(
-                        get: { updaterController.autoUpdateEnabled },
-                        set: { updaterController.autoUpdateEnabled = $0 }
-                    ))
-                    .toggleStyle(.checkbox)
-                    .help("Automatically download and install app updates")
-                    .disabled(updaterController.updater == nil)
+                Toggle("Auto-Update", isOn: Binding(
+                    get: { updaterController.autoUpdateEnabled },
+                    set: { updaterController.autoUpdateEnabled = $0 }
+                ))
+                .help("Automatically download and install app updates")
+                .disabled(updaterController.updater == nil)
 
+                HStack {
+                    Spacer()
                     Button("Check for Updates...") {
                         updaterController.checkForUpdates(nil)
                     }
-                    .buttonStyle(.bordered)
                     .help("Check for new versions and install updates")
                 }
             }
 
-            sectionHeader("Diagnostics")
-            VStack(alignment: .leading, spacing: 12) {
+            Section("Diagnostics") {
+                // Stays a row above the Email link (the copy says "below").
                 Text("Crash reports are collected locally. Use the email link below to open a pre-filled report email.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -150,7 +143,9 @@ extension PreferencesView {
                     }
                 }
 
-                HStack(spacing: 12) {
+                HStack(spacing: 8) {
+                    Spacer()
+
                     Button(isCrashSendRunning ? "Preparing..." : "Email Crash Report") {
                         sendPendingCrashReports()
                     }
@@ -161,21 +156,24 @@ extension PreferencesView {
                     Button("Export Report") {
                         exportLatestCrashReport()
                     }
-                    .buttonStyle(.bordered)
                     .disabled(crashPendingCount == 0)
                     .help("Export the most recent queued crash report as JSON.")
 
                     Button("Clear Pending") {
                         showCrashClearConfirm = true
                     }
-                    .buttonStyle(.bordered)
                     .disabled(crashPendingCount == 0)
                     .help("Delete all queued crash reports from local storage.")
                 }
-
             }
 
-            Spacer()
+            Section {
+                HStack {
+                    Spacer()
+                    Button("Reset to Defaults") { showingResetConfirm = true }
+                        .help("Revert all settings to their original values")
+                }
+            }
         }
         .onAppear {
             refreshCrashDiagnosticsState()

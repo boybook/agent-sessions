@@ -3,51 +3,48 @@ import AppKit
 
 extension PreferencesView {
     var openCodeTab: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            Text("OpenCode").font(.title2).fontWeight(.semibold)
-
+        PreferencesForm {
             if !openCodeAgentEnabled {
-                PreferenceCallout {
-                    Text("This agent is disabled in General → Active CLI agents.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                Section {
+                    PreferenceCallout {
+                        Text("This agent is disabled in General → Active CLI agents.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
 
-            Group {
             // Binary Source
-            VStack(alignment: .leading, spacing: 10) {
+            Section {
                 // Binary source segmented: Auto | Custom
-                labeledRow("Binary Source") {
-                    Picker("", selection: Binding(
-                        get: { opencodeSettings.binaryPath.isEmpty ? 0 : 1 },
-                        set: { idx in
-                            if idx == 0 {
-                                // Auto: clear override
-                                opencodeSettings.setBinaryPath("")
-                                scheduleOpenCodeProbe()
-                            } else {
-                                // Custom: open file picker
-                                pickOpenCodeBinary()
-                            }
+                Picker("Binary Source", selection: Binding(
+                    get: { opencodeSettings.binaryPath.isEmpty ? 0 : 1 },
+                    set: { idx in
+                        if idx == 0 {
+                            // Auto: clear override
+                            opencodeSettings.setBinaryPath("")
+                            scheduleOpenCodeProbe()
+                        } else {
+                            // Custom: open file picker
+                            pickOpenCodeBinary()
                         }
-                    )) {
-                        Text("Auto").tag(0)
-                        Text("Custom").tag(1)
                     }
-                    .pickerStyle(.segmented)
-                    .frame(maxWidth: 220)
-                    .help("Use the auto-detected OpenCode CLI or supply a custom path")
+                )) {
+                    Text("Auto").tag(0)
+                    Text("Custom").tag(1)
                 }
+                .pickerStyle(.segmented)
+                .help("Use the auto-detected OpenCode CLI or supply a custom path")
 
                 // Auto row (detected path + version + actions)
                 if opencodeSettings.binaryPath.isEmpty {
-                    HStack {
-                        Text("Detected:").font(.caption)
-                        Text(opencodeVersionString ?? "unknown").font(.caption).monospaced()
-                    }
-                    if let path = opencodeResolvedPath {
-                        Text(path).font(.caption2).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                    LabeledContent {
+                        Text(opencodeVersionString ?? "unknown").monospaced()
+                    } label: {
+                        Text("Detected:")
+                        if let path = opencodeResolvedPath {
+                            Text(path).lineLimit(1).truncationMode(.middle)
+                        }
                     }
 
                     // Show helpful message if binary not found
@@ -64,12 +61,11 @@ extension PreferencesView {
                         }
                     }
 
-                    HStack(spacing: 12) {
+                    HStack {
+                        Spacer()
                         Button("Check Version") { probeOpenCode() }
-                            .buttonStyle(.bordered)
                             .help("Query the detected OpenCode CLI for its version")
                         Button(agentUpdateButtonTitle(for: .opencode)) { runAgentUpdateFlow(for: .opencode) }
-                            .buttonStyle(.bordered)
                             .help("Check for a newer OpenCode CLI version and optionally update it")
                             .disabled(isAgentUpdateBusy(.opencode))
                         Button("Copy Path") {
@@ -78,7 +74,6 @@ extension PreferencesView {
                                 NSPasteboard.general.setString(p, forType: .string)
                             }
                         }
-                        .buttonStyle(.bordered)
                         .help("Copy the detected OpenCode CLI path to clipboard")
                         .disabled(opencodeResolvedPath == nil)
                         Button("Reveal") {
@@ -86,97 +81,92 @@ extension PreferencesView {
                                 NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: p)])
                             }
                         }
-                        .buttonStyle(.bordered)
                         .help("Reveal the detected OpenCode CLI binary in Finder")
                         .disabled(opencodeResolvedPath == nil)
                     }
                 } else {
                     // Custom mode: text field for override
-                    HStack(spacing: 10) {
-                        TextField("/path/to/opencode", text: Binding(get: { opencodeSettings.binaryPath }, set: { opencodeSettings.setBinaryPath($0) }))
+                    HStack(spacing: 8) {
+                        TextField("/path/to/opencode", text: Binding(get: { opencodeSettings.binaryPath }, set: { opencodeSettings.setBinaryPath($0) }),
+                                  prompt: Text("/path/to/opencode"))
+                            .labelsHidden()
                             .textFieldStyle(.roundedBorder)
-                            .frame(maxWidth: 360)
                             .onSubmit { scheduleOpenCodeProbe() }
                             .onChange(of: opencodeSettings.binaryPath) { _, _ in scheduleOpenCodeProbe() }
                             .help("Enter the full path to a custom OpenCode CLI binary")
                         Button("Choose…", action: pickOpenCodeBinary)
-                            .buttonStyle(.borderedProminent)
                             .help("Select the OpenCode CLI binary from the filesystem")
                         Button("Clear") {
                             opencodeSettings.setBinaryPath("")
                         }
-                        .buttonStyle(.bordered)
                         .help("Remove the custom binary override")
                     }
                 }
             }
+            .disabled(!openCodeAgentEnabled)
 
             // Storage backend indicator
-            sectionHeader("Live Sessions")
-            VStack(alignment: .leading, spacing: 4) {
-                Text(OpenCodePresenceIntegrationModel.shared.status)
-                    .font(.caption)
+            Section {
+                LabeledContent("Status") {
+                    Text(OpenCodePresenceIntegrationModel.shared.status)
+                }
+            } header: {
+                Text("Live Sessions")
+            } footer: {
                 Text("Terminal sessions: exact selected conversation and working/idle state through the automatic TUI integration. Desktop: working sessions only; OpenCode does not expose its selected idle conversation.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
             }
+            .disabled(!openCodeAgentEnabled)
 
-            sectionHeader("Session Storage")
-            openCodeStorageBackendRow
+            Section("Session Storage") {
+                openCodeStorageBackendRow
+            }
+            .disabled(!openCodeAgentEnabled)
 
             // Sessions Directory (OpenCode)
-            sectionHeader("Sessions Directory")
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 12) {
-                    TextField("Custom path (optional)", text: $opencodeSessionsPath)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(maxWidth: 360)
-                        .onSubmit {
-                            validateOpenCodeSessionsPath()
-                            commitOpenCodeSessionsPathIfValid()
-                        }
-                        .onChange(of: opencodeSessionsPath) { _, _ in
-                            validateOpenCodeSessionsPath()
-                            opencodeSessionsPathDebounce?.cancel()
-                            let work = DispatchWorkItem { commitOpenCodeSessionsPathIfValid() }
-                            opencodeSessionsPathDebounce = work
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
-                        }
-                        .help("Override the OpenCode sessions directory. Leave blank to use the default location")
+            Section("Sessions Directory") {
+                LabeledContent {
+                    HStack(spacing: 8) {
+                        TextField("Custom path (optional)", text: $opencodeSessionsPath,
+                                  prompt: Text(verbatim: "~/.local/share/opencode/storage/session"))
+                            .labelsHidden()
+                            .textFieldStyle(.roundedBorder)
+                            .onSubmit {
+                                validateOpenCodeSessionsPath()
+                                commitOpenCodeSessionsPathIfValid()
+                            }
+                            .onChange(of: opencodeSessionsPath) { _, _ in
+                                validateOpenCodeSessionsPath()
+                                opencodeSessionsPathDebounce?.cancel()
+                                let work = DispatchWorkItem { commitOpenCodeSessionsPathIfValid() }
+                                opencodeSessionsPathDebounce = work
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
+                            }
+                            .help("Override the OpenCode sessions directory. Leave blank to use the default location")
 
-                    Button(action: pickOpenCodeSessionsFolder) {
-                        Label("Choose…", systemImage: "folder")
-                            .labelStyle(.titleAndIcon)
+                        Button("Choose…", action: pickOpenCodeSessionsFolder)
+                            .help("Browse for a directory to store OpenCode session logs")
                     }
-                    .buttonStyle(.bordered)
-                    .help("Browse for a directory to store OpenCode session logs")
+                } label: {
+                    Text("Custom path (optional)")
+                    Text("Default: ~/.local/share/opencode/storage/session")
                 }
 
                 if !opencodeSessionsPathValid {
                     Label("Path must point to an existing folder", systemImage: "exclamationmark.triangle.fill")
-                        .font(.caption)
                         .foregroundStyle(.red)
                 }
-
-                Text("Default: ~/.local/share/opencode/storage/session")
-                    .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(.secondary)
             }
+            .disabled(!openCodeAgentEnabled)
 
             // Resume
-            sectionHeader("Resume")
-            VStack(alignment: .leading, spacing: 12) {
+            Section("Resume") {
                 Toggle("If resume fails, try continue in working directory", isOn: Binding(
                     get: { opencodeSettings.fallbackPolicy == .resumeThenContinue },
                     set: { opencodeSettings.setFallbackPolicy($0 ? .resumeThenContinue : .resumeOnly) }
                 ))
                 .help("When enabled, falls back to opencode --continue if --resume is unavailable")
             }
-            }
             .disabled(!openCodeAgentEnabled)
-
-            Spacer()
         }
         .onAppear {
             scheduleOpenCodeProbe()
@@ -198,9 +188,7 @@ extension PreferencesView {
                 HStack(spacing: 6) {
                     Image(systemName: "cylinder.fill")
                         .foregroundStyle(.green)
-                        .font(.caption)
                     Text("SQLite (\(sizeMB))")
-                        .font(.caption)
                         .foregroundStyle(.primary)
                 }
                 Text(dbURL.path)
@@ -212,18 +200,14 @@ extension PreferencesView {
                 HStack(spacing: 6) {
                     Image(systemName: "doc.text.fill")
                         .foregroundStyle(.secondary)
-                        .font(.caption)
                     Text("JSON (legacy)")
-                        .font(.caption)
                         .foregroundStyle(.secondary)
                 }
             case .none:
                 HStack(spacing: 6) {
                     Image(systemName: "questionmark.circle")
                         .foregroundStyle(.secondary)
-                        .font(.caption)
                     Text("Not found")
-                        .font(.caption)
                         .foregroundStyle(.secondary)
                 }
             }

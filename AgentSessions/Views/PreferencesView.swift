@@ -342,43 +342,39 @@ struct PreferencesView: View {
     @State var agentUpdatingSources: Set<SessionSource> = []
 
     var body: some View {
-        NavigationSplitView(columnVisibility: .constant(.all)) {
+        NavigationSplitView {
             List(selection: $selectedTab) {
-                // The app-wide panes: everything that configures no particular agent, with
-                // About pulled out below so it can carry its own top padding. The
-                // hand-listed "and not any of the twelve agent tabs" filter this replaces
-                // had to be extended for every new source.
-                ForEach(visibleTabs.filter { $0 != .about && $0.configuredSource == nil }, id: \.self) { tab in
-                    Label(tab.title, systemImage: tab.iconName)
-                        .tag(tab)
+                // The app-wide panes: everything that configures no particular agent.
+                Section {
+                    ForEach(visibleTabs.filter { $0.configuredSource == nil }, id: \.self) { tab in
+                        Label(tab.title, systemImage: tab.iconName)
+                            .tag(tab)
+                    }
                 }
-                Label(PreferencesTab.about.title, systemImage: PreferencesTab.about.iconName)
-                    .padding(.top, 1)
-                    .tag(PreferencesTab.about)
-                Divider()
-                // Two literal ForEach groups collapsed into the frozen order they
-                // concatenated to; droid is absent because it is in `sidebarHiddenSources`.
-                ForEach(PreferencesTab.sidebarAgentTabs, id: \.self) { tab in
-                    Label(tab.title, systemImage: tab.iconName)
-                        .tag(tab)
+                // The frozen agent order; droid is absent because it is in `sidebarHiddenSources`.
+                Section("Agents") {
+                    ForEach(PreferencesTab.sidebarAgentTabs, id: \.self) { tab in
+                        Label(tab.title, systemImage: tab.iconName)
+                            .tag(tab)
+                    }
                 }
             }
-            // Fix the sidebar width to avoid horizontal jumps when switching panes
-            .navigationSplitViewColumnWidth(min: 200, ideal: 200, max: 200)
+            // Like System Settings: the sidebar has a fixed width and does not collapse.
+            .toolbar(removing: .sidebarToggle)
+            .navigationSplitViewColumnWidth(min: 240, ideal: 240, max: 240)
         } detail: {
-            // Make content scrollable so footer actions remain visible on smaller panes
-            VStack(spacing: 0) {
-                ScrollView {
-                    tabBody
-                        .frame(maxWidth: .infinity, alignment: .topLeading)
-                        .padding(.bottom, 12)
-                }
-                Divider()
-                footer
-            }
+            tabBody
+                .navigationTitle(Text((selectedTab ?? .general).title))
         }
-        .frame(width: 740, height: 520)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .frame(minWidth: 800, idealWidth: 800, minHeight: 520, idealHeight: 640)
+        .alert("Reset All Settings?", isPresented: $showingResetConfirm) {
+            Button("Reset", role: .destructive) { resetToDefaults() }
+                .help("Confirm and restore default settings across all tabs")
+            Button("Cancel", role: .cancel) {}
+                .help("Abort resetting preferences")
+        } message: {
+            Text("This will reset General, Sessions, Resume (Codex & Claude), Usage, and Menu Bar settings.")
+        }
         .onAppear {
             loadCurrentSettings()
             // Respect caller-provided tab, otherwise restore last selection
@@ -391,8 +387,6 @@ struct PreferencesView: View {
                 refreshCrashDiagnosticsState()
             }
         }
-        // Keep UI feeling responsive when switching between panes
-        .animation(.easeInOut(duration: 0.12), value: selectedTab)
         // NOTE: the old per-provider strip keys used to be force-synced here whenever the
         // usage master toggle flipped. Nothing ever read them, so the sync only served to
         // overwrite a choice the user had made. Footer visibility now lives in
@@ -444,8 +438,8 @@ struct PreferencesView: View {
 
     // MARK: Layout chrome
 
+    @ViewBuilder
     private var tabBody: some View {
-        VStack(alignment: .leading, spacing: 24) {
             switch selectedTab ?? .general {
             case .general:
                 generalTab
@@ -501,33 +495,6 @@ struct PreferencesView: View {
             case .about:
                 aboutTab
             }
-        }
-        .padding(.horizontal, 24)
-        .padding(.vertical, 16)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .controlSize(.small)
-    }
-
-    private var footer: some View {
-        HStack(spacing: 12) {
-            Spacer()
-            Button("Reset to Defaults") { showingResetConfirm = true }
-                .buttonStyle(.bordered)
-                .help("Revert all settings to their original values")
-            Button("Close", action: closeWindow)
-                .buttonStyle(.borderedProminent)
-                .help("Dismiss settings without additional changes")
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .alert("Reset All Settings?", isPresented: $showingResetConfirm) {
-            Button("Reset", role: .destructive) { resetToDefaults() }
-                .help("Confirm and restore default settings across all tabs")
-            Button("Cancel", role: .cancel) {}
-                .help("Abort resetting preferences")
-        } message: {
-            Text("This will reset General, Sessions, Resume (Codex & Claude), Usage, and Menu Bar settings.")
-        }
     }
 
     // MARK: Tabs

@@ -63,56 +63,40 @@ extension PreferencesView {
     }
 
     var usageTrackingTab: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            Text("Usage Tracking")
-                .font(.title2)
-                .fontWeight(.semibold)
-
-            // Sources
-            sectionHeader("Usage Sources")
-            VStack(alignment: .leading, spacing: 12) {
-                // Codex
-                HStack(spacing: 12) {
-                    toggleRow("Enable Codex tracking", isOn: $codexUsageEnabled, help: "Turn Codex usage tracking on or off (independent of strip/menu bar)")
+        PreferencesForm {
+            // Sources: Codex
+            Section("Usage Sources") {
+                toggleRow("Enable Codex tracking", isOn: $codexUsageEnabled, help: "Turn Codex usage tracking on or off (independent of strip/menu bar)")
+                    .disabled(!codexAgentEnabled)
+                Picker("Refresh every", selection: $codexPollingInterval) {
+                    Text("1 minute").tag(60)
+                    Text("2 minutes").tag(120)
+                    Text("3 minutes").tag(180)
+                }
+                .pickerStyle(.segmented)
+                .help("How often to refresh Codex usage while a usage surface is visible. Automatic /status probes keep their separate cooldowns.")
+                .disabled(!codexAgentEnabled)
+                HStack {
+                    Spacer()
                     Button("Refresh now") { CodexUsageModel.shared.refreshNow() }
-                        .buttonStyle(.bordered)
                         .disabled(!codexUsageEnabled || !codexAgentEnabled)
                 }
-                .disabled(!codexAgentEnabled)
-                labeledRow("Refresh every") {
-                    Picker("", selection: $codexPollingInterval) {
-                        Text("1 minute").tag(60)
-                        Text("2 minutes").tag(120)
-                        Text("3 minutes").tag(180)
-                    }
-                    .pickerStyle(.segmented)
-                    .help("How often to refresh Codex usage while a usage surface is visible. Automatic /status probes keep their separate cooldowns.")
-                }
-                .disabled(!codexAgentEnabled)
+            }
 
-                Divider().padding(.vertical, 6)
-
-                // Claude
-                HStack(spacing: 12) {
-                    toggleRow("Enable Claude tracking", isOn: $claudeUsageEnabled, help: "Turn Claude usage tracking on or off (independent of strip/menu bar)")
-                    Button("Refresh now") { ClaudeUsageModel.shared.refreshNow() }
-                        .buttonStyle(.bordered)
-                        .disabled(!claudeUsageEnabled || !claudeAgentEnabled)
-                }
-                .disabled(!claudeAgentEnabled)
-                labeledRow("Data source") {
-                    Picker("", selection: Binding(
-                        get: { ClaudeUsageMode(rawValue: UserDefaults.standard.string(forKey: PreferencesKey.claudeUsageMode) ?? "auto") ?? .auto },
-                        set: { UserDefaults.standard.set($0.rawValue, forKey: PreferencesKey.claudeUsageMode) }
-                    )) {
-                        ForEach(ClaudeUsageMode.allCases, id: \.rawValue) { mode in
-                            Text(mode.displayName).tag(mode)
-                        }
+            // Sources: Claude
+            Section {
+                toggleRow("Enable Claude tracking", isOn: $claudeUsageEnabled, help: "Turn Claude usage tracking on or off (independent of strip/menu bar)")
+                    .disabled(!claudeAgentEnabled)
+                Picker("Data source", selection: Binding(
+                    get: { ClaudeUsageMode(rawValue: UserDefaults.standard.string(forKey: PreferencesKey.claudeUsageMode) ?? "auto") ?? .auto },
+                    set: { UserDefaults.standard.set($0.rawValue, forKey: PreferencesKey.claudeUsageMode) }
+                )) {
+                    ForEach(ClaudeUsageMode.allCases, id: \.rawValue) { mode in
+                        Text(mode.displayName).tag(mode)
                     }
-                    .pickerStyle(.menu)
-                    .frame(maxWidth: 200)
-                    .help("Auto: OAuth endpoint (60s); CLI tmux fallback only if you opt in below. Web API only: claude.ai session cookie. tmux only: legacy behavior.")
                 }
+                .pickerStyle(.menu)
+                .help("Auto: OAuth endpoint (60s); CLI tmux fallback only if you opt in below. Web API only: claude.ai session cookie. tmux only: legacy behavior.")
                 .disabled(!claudeAgentEnabled || !claudeUsageEnabled)
                 toggleRow(
                     "Include Web API in Auto fallback",
@@ -137,88 +121,83 @@ extension PreferencesView {
                 )
                 .disabled(!claudeAgentEnabled || !claudeUsageEnabled ||
                           (ClaudeUsageMode(rawValue: UserDefaults.standard.string(forKey: PreferencesKey.claudeUsageMode) ?? "auto") ?? .auto) != .auto)
-                labeledRow("Refresh every") {
-                    Picker("", selection: $claudePollingInterval) {
-                        Text("2 minutes").tag(120)
-                        Text("3 minutes").tag(180)
-                    }
-                    .pickerStyle(.segmented)
-                    .help("How often to refresh Claude tmux fallback while a usage surface is visible. OAuth and Web API sources refresh every 60 seconds.")
+                Picker("Refresh every", selection: $claudePollingInterval) {
+                    Text("2 minutes").tag(120)
+                    Text("3 minutes").tag(180)
                 }
+                .pickerStyle(.segmented)
+                .help("How often to refresh Claude tmux fallback while a usage surface is visible. OAuth and Web API sources refresh every 60 seconds.")
                 .disabled(!claudeAgentEnabled || !claudeUsageEnabled)
+                HStack {
+                    Spacer()
+                    Button("Refresh now") { ClaudeUsageModel.shared.refreshNow() }
+                        .disabled(!claudeUsageEnabled || !claudeAgentEnabled)
+                }
             }
 
             // Where usage is shown (shared)
-            sectionHeader("Main Window")
-            VStack(alignment: .leading, spacing: 12) {
+            Section("Main Window") {
                 toggleRow("Show usage in the footer", isOn: $showFooterUsage,
                           help: "Show the usage meters along the bottom of the main window. Turn this off if you read usage in the menu bar or the Quota Meter — tracking keeps running either way.")
                     .disabled(!(codexUsageEnabled && codexAgentEnabled) && !(claudeUsageEnabled && claudeAgentEnabled))
             }
 
             // Display style (shared across Codex & Claude)
-            sectionHeader("Display Style")
-            VStack(alignment: .leading, spacing: 12) {
-                labeledRow("Quota Meter display") {
-                    Picker("", selection: Binding(
-                        get: { UsageDisplayMode(rawValue: usageDisplayModeRaw) ?? .left },
-                        set: { usageDisplayModeRaw = $0.rawValue }
-                    )) {
-                        ForEach(UsageDisplayMode.allCases) { mode in
-                            Text(mode.title).tag(mode)
-                        }
+            Section("Display Style") {
+                Picker(selection: Binding(
+                    get: { UsageDisplayMode(rawValue: usageDisplayModeRaw) ?? .left },
+                    set: { usageDisplayModeRaw = $0.rawValue }
+                )) {
+                    ForEach(UsageDisplayMode.allCases) { mode in
+                        Text(mode.title).tag(mode)
                     }
-                    .pickerStyle(.segmented)
-                    .help("Choose whether usage meters show remaining (left) or used percentages.")
+                } label: {
+                    Text("Quota Meter display")
+                    Text("Applies to Codex and Claude usage strips, menu bar reset meters, and the Quota Meter.")
                 }
-                Text("Applies to Codex and Claude usage strips, menu bar reset meters, and the Quota Meter.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                .pickerStyle(.segmented)
+                .help("Choose whether usage meters show remaining (left) or used percentages.")
+            }
 
-                labeledRow("Usage sections shown") {
-                    HStack(spacing: 16) {
-                        ForEach(QuotaMeterProvider.allCases) { provider in
-                            Toggle(provider.displayName, isOn: quotaMeterProviderVisibilityBinding(provider))
-                                .toggleStyle(.checkbox)
-                                .disabled(!quotaMeterProviderConfigured(provider))
-                                .help(quotaMeterProviderConfigured(provider)
-                                    ? "Show or hide the \(provider.displayName) section in Quota Meter. Tracking continues while hidden."
-                                    : "Enable \(provider.displayName) usage tracking before showing it in Quota Meter.")
-                        }
-                    }
+            Section {
+                ForEach(QuotaMeterProvider.allCases) { provider in
+                    Toggle(provider.displayName, isOn: quotaMeterProviderVisibilityBinding(provider))
+                        .disabled(!quotaMeterProviderConfigured(provider))
+                        .help(quotaMeterProviderConfigured(provider)
+                            ? "Show or hide the \(provider.displayName) section in Quota Meter. Tracking continues while hidden."
+                            : "Enable \(provider.displayName) usage tracking before showing it in Quota Meter.")
                 }
+            } header: {
+                Text("Usage sections shown")
+            } footer: {
                 Text("This controls only the standalone Quota Meter. Tracking, the main-window footer, the menu bar, and session indexing are unchanged.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            }
 
-                labeledRow("Session Runway") {
-                    Picker("", selection: Binding(
-                        get: { QuotaMeterRunwayVisibility.current(raw: quotaMeterRunwayVisibilityRaw) },
-                        set: { quotaMeterRunwayVisibilityRaw = $0.rawValue }
-                    )) {
-                        ForEach(QuotaMeterRunwayVisibility.allCases) { visibility in
-                            Text(visibility.title).tag(visibility)
-                        }
+            Section {
+                Picker("Session Runway", selection: Binding(
+                    get: { QuotaMeterRunwayVisibility.current(raw: quotaMeterRunwayVisibilityRaw) },
+                    set: { quotaMeterRunwayVisibilityRaw = $0.rawValue }
+                )) {
+                    ForEach(QuotaMeterRunwayVisibility.allCases) { visibility in
+                        Text(visibility.title).tag(visibility)
                     }
-                    .pickerStyle(.segmented)
-                    .help("Choose when Quota Meter shows the session runway drawer.")
                 }
+                .pickerStyle(.segmented)
+                .help("Choose when Quota Meter shows the session runway drawer.")
 
-                labeledRow("On-track glyph") {
-                    Picker("", selection: Binding(
-                        get: { QuotaMeterOnTrackGlyph.current(raw: quotaMeterOnTrackGlyphRaw) },
-                        set: { quotaMeterOnTrackGlyphRaw = $0.rawValue }
-                    )) {
-                        ForEach(QuotaMeterOnTrackGlyph.allCases) { glyph in
-                            Text(glyph.title).tag(glyph)
-                        }
+                Picker(selection: Binding(
+                    get: { QuotaMeterOnTrackGlyph.current(raw: quotaMeterOnTrackGlyphRaw) },
+                    set: { quotaMeterOnTrackGlyphRaw = $0.rawValue }
+                )) {
+                    ForEach(QuotaMeterOnTrackGlyph.allCases) { glyph in
+                        Text(glyph.title).tag(glyph)
                     }
-                    .pickerStyle(.segmented)
-                    .help("When you’re working but on track to fit the 5-hour window, show a smiling face or a quiet dot in the run-out column.")
+                } label: {
+                    Text("On-track glyph")
+                    Text(QuotaMeterOnTrackGlyph.current(raw: quotaMeterOnTrackGlyphRaw).detail)
                 }
-                Text(QuotaMeterOnTrackGlyph.current(raw: quotaMeterOnTrackGlyphRaw).detail)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                .pickerStyle(.segmented)
+                .help("When you’re working but on track to fit the 5-hour window, show a smiling face or a quiet dot in the run-out column.")
             }
 
             // Menu Bar controls moved to the Menu Bar pane
@@ -261,13 +240,8 @@ extension PreferencesView {
     }
 
     var limitAlertsTab: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            Text("Limit Alerts")
-                .font(.title2)
-                .fontWeight(.semibold)
-
-            sectionHeader("Alert Sources")
-            VStack(alignment: .leading, spacing: 12) {
+        PreferencesForm {
+            Section("Alert Sources") {
                 toggleRow(
                     "Notify for usage limits",
                     isOn: $usageLimitNotificationsEnabled,
@@ -275,56 +249,44 @@ extension PreferencesView {
                 )
                 .disabled(!(codexAgentEnabled && codexUsageEnabled) && !(claudeAgentEnabled && claudeUsageEnabled))
 
-                labeledRow("Providers") {
-                    HStack(spacing: 16) {
-                        Toggle("Codex", isOn: $usageLimitNotificationCodexEnabled)
-                            .toggleStyle(.checkbox)
-                            .disabled(!codexAgentEnabled || !codexUsageEnabled || !usageLimitNotificationsEnabled)
-                        Toggle("Claude", isOn: $usageLimitNotificationClaudeEnabled)
-                            .toggleStyle(.checkbox)
-                            .disabled(!claudeAgentEnabled || !claudeUsageEnabled || !usageLimitNotificationsEnabled)
-                    }
+                Toggle("Codex", isOn: $usageLimitNotificationCodexEnabled)
+                    .disabled(!codexAgentEnabled || !codexUsageEnabled || !usageLimitNotificationsEnabled)
                     .help("Choose which usage sources can send limit alerts.")
-                }
-                .disabled(!usageLimitNotificationsEnabled)
+                Toggle("Claude", isOn: $usageLimitNotificationClaudeEnabled)
+                    .disabled(!claudeAgentEnabled || !claudeUsageEnabled || !usageLimitNotificationsEnabled)
+                    .help("Choose which usage sources can send limit alerts.")
             }
 
-            sectionHeader("Alert Types")
-            VStack(alignment: .leading, spacing: 12) {
-                labeledRow("Warnings") {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Toggle("Low remaining", isOn: $usageLimitNotificationApproachingEnabled)
-                            .toggleStyle(.checkbox)
-                        Toggle("Predicted run-out soon", isOn: $usageLimitNotificationProjectedEnabled)
-                            .toggleStyle(.checkbox)
-                        Toggle("Limit exhausted", isOn: $usageLimitNotificationExhaustedEnabled)
-                            .toggleStyle(.checkbox)
-                        Toggle("5h reset reminder", isOn: $usageLimitNotificationFiveHourResetEnabled)
-                            .toggleStyle(.checkbox)
-                    }
+            Section {
+                Toggle("Low remaining", isOn: $usageLimitNotificationApproachingEnabled)
+                    .disabled(!usageLimitNotificationsEnabled)
                     .help("Choose which limit events should create alerts.")
-                }
-                .disabled(!usageLimitNotificationsEnabled)
+                Toggle("Predicted run-out soon", isOn: $usageLimitNotificationProjectedEnabled)
+                    .disabled(!usageLimitNotificationsEnabled)
+                    .help("Choose which limit events should create alerts.")
+                Toggle("Limit exhausted", isOn: $usageLimitNotificationExhaustedEnabled)
+                    .disabled(!usageLimitNotificationsEnabled)
+                    .help("Choose which limit events should create alerts.")
+                Toggle("5h reset reminder", isOn: $usageLimitNotificationFiveHourResetEnabled)
+                    .disabled(!usageLimitNotificationsEnabled)
+                    .help("Choose which limit events should create alerts.")
 
                 labeledRow("Low limit threshold") {
                     Stepper(value: $usageLimitNotificationThresholdPercent, in: 1...50, step: 1) {
                         Text("\(usageLimitNotificationThresholdPercent)% remaining")
                             .monospacedDigit()
                     }
-                    .frame(maxWidth: 220, alignment: .leading)
                     .help("Alert once per reset window when a 5h or weekly limit reaches this remaining percentage.")
                 }
                 .disabled(!usageLimitNotificationsEnabled || !usageLimitNotificationApproachingEnabled)
-
+            } header: {
+                Text("Alert Types")
+            } footer: {
                 Text("Prediction alerts use fresh usage data and fire when the current burn rate can exhaust a 5h or weekly limit within 60 minutes before reset. Recent cached data can still produce low, exhausted, and 5h reset alerts; stale data is ignored.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
             }
 
-            sectionHeader("Diagnostics")
-            TimelineView(.periodic(from: Date(), by: 30)) { _ in
-                VStack(alignment: .leading, spacing: 8) {
+            Section {
+                TimelineView(.periodic(from: Date(), by: 30)) { _ in
                     limitAlertDiagnosticsRow(
                         provider: "Codex",
                         source: usageLimitDiagnosticsCodexSource,
@@ -339,7 +301,8 @@ extension PreferencesView {
                         deliveryAt: usageLimitDiagnosticsCodexDeliveryAt,
                         nextResetAt: usageLimitDiagnosticsCodexNextResetReminderAt
                     )
-                    Divider()
+                }
+                TimelineView(.periodic(from: Date(), by: 30)) { _ in
                     limitAlertDiagnosticsRow(
                         provider: "Claude",
                         source: usageLimitDiagnosticsClaudeSource,
@@ -354,15 +317,14 @@ extension PreferencesView {
                         deliveryAt: usageLimitDiagnosticsClaudeDeliveryAt,
                         nextResetAt: usageLimitDiagnosticsClaudeNextResetReminderAt
                     )
-                    Text("Updates when usage tracking receives a limit snapshot. Projection diagnostics use fresh or recent cached data; reset reminders require banners and 5h reset reminders to be enabled.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
                 }
+            } header: {
+                Text("Diagnostics")
+            } footer: {
+                Text("Updates when usage tracking receives a limit snapshot. Projection diagnostics use fresh or recent cached data; reset reminders require banners and 5h reset reminders to be enabled.")
             }
 
-            sectionHeader("Delivery")
-            VStack(alignment: .leading, spacing: 12) {
+            Section("Delivery") {
                 toggleRow(
                     "macOS notification banners",
                     isOn: $usageLimitNotificationVisualEnabled,

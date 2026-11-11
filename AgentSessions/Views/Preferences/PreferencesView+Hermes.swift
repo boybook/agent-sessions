@@ -3,135 +3,129 @@ import AppKit
 
 extension PreferencesView {
     var hermesCLITab: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            Text("Hermes").font(.title2).fontWeight(.semibold)
-
+        PreferencesForm {
             if !hermesAgentEnabled {
-                PreferenceCallout {
-                    Text("This agent is disabled in General → Active CLI agents.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            Group {
-                sectionHeader("Hermes CLI Binary")
-                VStack(alignment: .leading, spacing: 10) {
-                    labeledRow("Binary Source") {
-                        Picker("", selection: Binding(
-                            get: { hermesSettings.binaryPath.isEmpty ? 0 : 1 },
-                            set: { idx in
-                                if idx == 0 {
-                                    hermesSettings.setBinaryPath("")
-                                    scheduleHermesProbe()
-                                } else {
-                                    pickHermesBinary()
-                                }
-                            }
-                        )) {
-                            Text("Auto").tag(0)
-                            Text("Custom").tag(1)
-                        }
-                        .pickerStyle(.segmented)
-                        .frame(maxWidth: 220)
-                    }
-
-                    if hermesSettings.binaryPath.isEmpty {
-                        HStack {
-                            Text("Detected:").font(.caption)
-                            Text(hermesVersionString ?? "unknown").font(.caption).monospaced()
-                        }
-                        if let path = hermesResolvedPath {
-                            Text(path).font(.caption2).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
-                        }
-                        if hermesProbeState == .failure && hermesVersionString == nil {
-                            PreferenceCallout {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("Hermes CLI not found")
-                                        .font(.caption)
-                                        .fontWeight(.medium)
-                                    Text("Install Hermes Agent and ensure `hermes` is on PATH.")
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                        }
-                        HStack(spacing: 12) {
-                            Button("Check Version") { probeHermes() }
-                                .buttonStyle(.bordered)
-                            Button("Copy Path") {
-                                if let path = hermesResolvedPath {
-                                    NSPasteboard.general.clearContents()
-                                    NSPasteboard.general.setString(path, forType: .string)
-                                }
-                            }
-                            .buttonStyle(.bordered)
-                            .disabled(hermesResolvedPath == nil)
-                            Button("Reveal") {
-                                if let path = hermesResolvedPath {
-                                    NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
-                                }
-                            }
-                            .buttonStyle(.bordered)
-                            .disabled(hermesResolvedPath == nil)
-                        }
-                    } else {
-                        HStack(spacing: 10) {
-                            TextField("/path/to/hermes", text: Binding(get: { hermesSettings.binaryPath }, set: { hermesSettings.setBinaryPath($0) }))
-                                .textFieldStyle(.roundedBorder)
-                                .frame(maxWidth: 360)
-                                .onSubmit { scheduleHermesProbe() }
-                                .onChange(of: hermesSettings.binaryPath) { _, _ in scheduleHermesProbe() }
-                            Button("Choose…", action: pickHermesBinary)
-                                .buttonStyle(.borderedProminent)
-                        }
-                        if !hermesSettings.binaryPath.isEmpty, hermesProbeState == .failure {
-                            Text("Invalid Hermes binary path.")
-                                .font(.caption)
-                                .foregroundStyle(.red)
-                        }
-                    }
-                }
-
-                sectionHeader("Sessions Folder")
-                VStack(alignment: .leading, spacing: 8) {
-                    labeledRow("Storage Root") {
-                        HStack(spacing: 10) {
-                            TextField("~/.hermes/sessions", text: $hermesSessionsPath)
-                                .textFieldStyle(.roundedBorder)
-                                .frame(maxWidth: 360)
-                                .onSubmit {
-                                    validateHermesSessionsPath()
-                                    commitHermesSessionsPathIfValid()
-                                }
-                                .onChange(of: hermesSessionsPath) { _, _ in
-                                    hermesSessionsPathDebounce?.cancel()
-                                    let work = DispatchWorkItem {
-                                        validateHermesSessionsPath()
-                                        commitHermesSessionsPathIfValid()
-                                    }
-                                    hermesSessionsPathDebounce = work
-                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
-                                }
-                            Button("Choose…", action: pickHermesSessionsFolder)
-                                .buttonStyle(.borderedProminent)
-                        }
-                    }
-
-                    if !hermesSessionsPathValid {
-                        Text("Folder does not exist or is not a directory.")
-                            .font(.caption)
-                            .foregroundStyle(.red)
-                    } else {
-                        Text("Default: ~/.hermes/sessions")
+                Section {
+                    PreferenceCallout {
+                        Text("This agent is disabled in General → Active CLI agents.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
                 }
             }
+
+            Section {
+                Picker("Binary Source", selection: Binding(
+                    get: { hermesSettings.binaryPath.isEmpty ? 0 : 1 },
+                    set: { idx in
+                        if idx == 0 {
+                            hermesSettings.setBinaryPath("")
+                            scheduleHermesProbe()
+                        } else {
+                            pickHermesBinary()
+                        }
+                    }
+                )) {
+                    Text("Auto").tag(0)
+                    Text("Custom").tag(1)
+                }
+                .pickerStyle(.segmented)
+
+                if hermesSettings.binaryPath.isEmpty {
+                    LabeledContent("Detected:") {
+                        Text(hermesVersionString ?? "unknown").monospaced()
+                    }
+                    if let path = hermesResolvedPath {
+                        LabeledContent("Resolved Path") {
+                            Text(path).lineLimit(1).truncationMode(.middle)
+                        }
+                    }
+                    if hermesProbeState == .failure && hermesVersionString == nil {
+                        PreferenceCallout {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Hermes CLI not found")
+                                    .font(.caption)
+                                    .fontWeight(.medium)
+                                Text("Install Hermes Agent and ensure `hermes` is on PATH.")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    HStack {
+                        Spacer()
+                        Button("Check Version") { probeHermes() }
+                        Button("Copy Path") {
+                            if let path = hermesResolvedPath {
+                                NSPasteboard.general.clearContents()
+                                NSPasteboard.general.setString(path, forType: .string)
+                            }
+                        }
+                        .disabled(hermesResolvedPath == nil)
+                        Button("Reveal") {
+                            if let path = hermesResolvedPath {
+                                NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+                            }
+                        }
+                        .disabled(hermesResolvedPath == nil)
+                    }
+                } else {
+                    HStack(spacing: 8) {
+                        TextField("/path/to/hermes", text: Binding(get: { hermesSettings.binaryPath }, set: { hermesSettings.setBinaryPath($0) }),
+                                  prompt: Text("/path/to/hermes"))
+                            .labelsHidden()
+                            .textFieldStyle(.roundedBorder)
+                            .onSubmit { scheduleHermesProbe() }
+                            .onChange(of: hermesSettings.binaryPath) { _, _ in scheduleHermesProbe() }
+                        Button("Choose…", action: pickHermesBinary)
+                    }
+                    if !hermesSettings.binaryPath.isEmpty, hermesProbeState == .failure {
+                        Text("Invalid Hermes binary path.")
+                            .foregroundStyle(.red)
+                    }
+                }
+            } header: {
+                Text("Hermes CLI Binary")
+            }
             .disabled(!hermesAgentEnabled)
 
-            Spacer()
+            Section {
+                LabeledContent {
+                    HStack(spacing: 8) {
+                        TextField("Storage Root", text: $hermesSessionsPath, prompt: Text("~/.hermes/sessions"))
+                            .labelsHidden()
+                            .textFieldStyle(.roundedBorder)
+                            .onSubmit {
+                                validateHermesSessionsPath()
+                                commitHermesSessionsPathIfValid()
+                            }
+                            .onChange(of: hermesSessionsPath) { _, _ in
+                                hermesSessionsPathDebounce?.cancel()
+                                let work = DispatchWorkItem {
+                                    validateHermesSessionsPath()
+                                    commitHermesSessionsPathIfValid()
+                                }
+                                hermesSessionsPathDebounce = work
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
+                            }
+                        Button("Choose…", action: pickHermesSessionsFolder)
+                    }
+                } label: {
+                    Text("Storage Root")
+                }
+
+                if !hermesSessionsPathValid {
+                    Text("Folder does not exist or is not a directory.")
+                        .foregroundStyle(.red)
+                }
+            } header: {
+                Text("Sessions Folder")
+            } footer: {
+                if hermesSessionsPathValid {
+                    Text("Default: ~/.hermes/sessions")
+                }
+            }
+            .disabled(!hermesAgentEnabled)
         }
         .onAppear {
             scheduleHermesProbe()

@@ -3,21 +3,30 @@ import SwiftUI
 extension PreferencesView {
 
     var usageProbesTab: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            Text("Usage Probes")
-                .font(.title2)
-                .fontWeight(.semibold)
-
-            Text("Runs lightweight terminal-based probes in dedicated working folders to refresh usage limits. Probe sessions are auto-generated /usage checks stored in a separate Claude project. Cleanup only removes validated probe sessions; your normal sessions are never touched.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+        PreferencesForm {
+            Section {
+                Text("Runs lightweight terminal-based probes in dedicated working folders to refresh usage limits. Probe sessions are auto-generated /usage checks stored in a separate Claude project. Cleanup only removes validated probe sessions; your normal sessions are never touched.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
 
             // No ephemeral in-pane messages; results are shown in modal dialogs only.
 
-	            // Claude subsection
-	            sectionHeader("Claude")
-            VStack(alignment: .leading, spacing: 12) {
+            // Claude subsection
+            Section("Claude") {
                 HStack(spacing: 12) {
+                    if isClaudeHardProbeRunning {
+                        Text("Wait for probe result…")
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    } else {
+                        Text("May count toward Claude Code usage limits")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer()
+
                     Button("Refresh Claude usage now") {
                         isClaudeHardProbeRunning = true
                         let accepted = ProbeCoordinator.shared.request(.claude) { report in
@@ -74,27 +83,17 @@ extension PreferencesView {
                             showClaudeProbeResult = true
                         }
                         if !accepted { isClaudeHardProbeRunning = false }
-	                    }
-	                    .buttonStyle(.bordered)
-	                    // Disabled while running: a repeat click would re-set the flag,
-	                    // take the coordinator's .alreadyRunning rejection, and the
-	                    // rejection cleanup would wrongly clear "Wait for probe result…"
-	                    // mid-probe. The clear-on-rejection below stays correct for the
-	                    // cross-surface case (probe started elsewhere → honest no-op).
-	                    .disabled(!claudeUsageEnabled || !claudeAgentEnabled || isClaudeHardProbeRunning)
-	                    .help("Instantly refresh Claude usage data. Note: probing launches Claude Code and may count toward Claude Code usage limits.")
-
-                    if isClaudeHardProbeRunning {
-                        Text("Wait for probe result…")
-                            .font(.caption)
-                            .foregroundStyle(.red)
-                    } else {
-                        Text("May count toward Claude Code usage limits")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
                     }
+                    // Disabled while running: a repeat click would re-set the flag,
+                    // take the coordinator's .alreadyRunning rejection, and the
+                    // rejection cleanup would wrongly clear "Wait for probe result…"
+                    // mid-probe. The clear-on-rejection below stays correct for the
+                    // cross-surface case (probe started elsewhere → honest no-op).
+                    .disabled(!claudeUsageEnabled || !claudeAgentEnabled || isClaudeHardProbeRunning)
+                    .help("Instantly refresh Claude usage data. Note: probing launches Claude Code and may count toward Claude Code usage limits.")
                 }
-                Picker("", selection: Binding(
+
+                Picker("Claude Probe Cleanup", selection: Binding(
                     get: { claudeProbeCleanupMode },
                     set: { newVal in
                         if newVal == "auto" {
@@ -109,58 +108,34 @@ extension PreferencesView {
                     Text("Auto-delete after each probe").foregroundStyle(.red).tag("auto")
                 }
                 .pickerStyle(.segmented)
-                .frame(maxWidth: 440)
 
-                HStack(spacing: 12) {
+                HStack {
+                    Spacer()
                     Button("Clean Claude probe sessions now") { showConfirmDeleteNow = true }
                         .buttonStyle(.borderedProminent)
                         .tint(.red)
                 }
             }
-            // Hard-probe result dialog for Claude
-            .alert("Claude /usage Probe", isPresented: $showClaudeProbeResult) {
-                Button("Close", role: .cancel) {}
-            } message: {
-                Text(claudeProbeMessage)
-                    .font(.system(.body, design: .monospaced))
-                    .multilineTextAlignment(.leading)
-            }
-            .alert("Enable Automatic Cleanup?", isPresented: $showConfirmAutoDelete) {
-                Button("Cancel", role: .cancel) {}
-                Button("Enable", role: .destructive) {
-                    claudeProbeCleanupMode = "auto"
-                    ClaudeProbeProject.setCleanupMode(.auto)
-                    showCleanupFlash("Claude auto-delete enabled. Will remove probe sessions after each probe.", color: .green)
-                }
-            } message: {
-                Text("After each usage probe, only the dedicated Claude probe project is deleted once safety checks verify it contains only probe sessions.")
-            }
-            .alert("Delete Claude Probe Sessions Now?", isPresented: $showConfirmDeleteNow) {
-                Button("Cancel", role: .cancel) {}
-                Button("Delete", role: .destructive) {
-                    let res = ClaudeProbeProject.cleanupNowUserInitiated()
-                    // Inline feedback moved to a modal summary dialog below
-                    handleCleanupResult(res, manual: true)
-                }
-            } message: {
-                Text("Probe sessions are short /usage checks created by Agent Sessions in a dedicated Claude project. This cleanup only removes that probe project after validation, and never touches your normal Claude sessions.")
-            }
-
-            // Result summary dialog
-            .alert("Claude Probe Cleanup", isPresented: $showClaudeCleanupResult) {
-                Button("Close", role: .cancel) {}
-            } message: {
-                Text(claudeCleanupMessage)
-            }
 
             // Codex subsection
-            sectionHeader("Codex")
-            VStack(alignment: .leading, spacing: 12) {
-	                Toggle("Allow auto /status probe when no recent sessions", isOn: $codexAllowStatusProbe)
-	                    .toggleStyle(.checkbox)
-	                    .disabled(!codexUsageEnabled || !codexAgentEnabled)
-	                    .help("When there are no recent Codex sessions (6+ hours) and the strip or menu bar is visible, ask Codex CLI (/status) via tmux for current usage.")
+            Section {
+                Toggle("Allow auto /status probe when no recent sessions", isOn: $codexAllowStatusProbe)
+                    .disabled(!codexUsageEnabled || !codexAgentEnabled)
+                    .help("When there are no recent Codex sessions (6+ hours) and the strip or menu bar is visible, ask Codex CLI (/status) via tmux for current usage.")
+
                 HStack(spacing: 12) {
+                    if isCodexHardProbeRunning {
+                        Text("Wait for probe result…")
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    } else {
+                        Text("Consumes tokens for 1-2 messages")
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
+
+                    Spacer()
+
                     Button("Run hard Codex /status probe now") {
                         isCodexHardProbeRunning = true
                         let accepted = ProbeCoordinator.shared.request(.codex) { report in
@@ -196,27 +171,13 @@ extension PreferencesView {
                             showCodexProbeResult = true
                         }
                         if !accepted { isCodexHardProbeRunning = false }
-	                    }
-	                    .buttonStyle(.bordered)
-	                    // Same repeat-click guard as the Claude probe button above.
-	                    .disabled(!codexUsageEnabled || !codexAgentEnabled || isCodexHardProbeRunning)
-	                    .help("Runs a one-off /status probe regardless of staleness or auto-probe setting, and shows the result.")
-
-                    if isCodexHardProbeRunning {
-                        Text("Wait for probe result…")
-                            .font(.caption)
-                            .foregroundStyle(.red)
-                    } else {
-                        Text("Consumes tokens for 1-2 messages")
-                            .font(.caption)
-                            .foregroundStyle(.red)
                     }
+                    // Same repeat-click guard as the Claude probe button above.
+                    .disabled(!codexUsageEnabled || !codexAgentEnabled || isCodexHardProbeRunning)
+                    .help("Runs a one-off /status probe regardless of staleness or auto-probe setting, and shows the result.")
                 }
-                Text("Auth-backed tracking is primary for Codex limits. JSONL remains fallback-only for limits, and /status is used as a last resort.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
 
-                Picker("", selection: Binding(
+                Picker("Codex Probe Cleanup", selection: Binding(
                     get: { codexProbeCleanupMode },
                     set: { newVal in
                         if newVal == "auto" {
@@ -231,64 +192,97 @@ extension PreferencesView {
                     Text("Auto-delete after each probe").foregroundStyle(.red).tag("auto")
                 }
                 .pickerStyle(.segmented)
-                .frame(maxWidth: 440)
 
-                HStack(spacing: 12) {
+                HStack {
+                    Spacer()
                     Button("Delete Codex probe sessions now") { showConfirmCodexDeleteNow = true }
                         .buttonStyle(.borderedProminent)
                         .tint(.red)
                 }
-            }
-            .alert("Enable Automatic Cleanup?", isPresented: $showConfirmCodexAutoDelete) {
-                Button("Cancel", role: .cancel) {}
-                Button("Enable", role: .destructive) {
-                    codexProbeCleanupMode = "auto"
-                    CodexProbeCleanup.setCleanupMode(.auto)
-                    showCleanupFlash("Codex auto-delete enabled. Will remove probe sessions after each probe.", color: .green)
-                }
-            } message: {
-                Text("After each status probe, only Codex probe sessions are deleted once safety checks verify they were created by Agent Sessions.")
-            }
-            .alert("Delete Codex Probe Sessions Now?", isPresented: $showConfirmCodexDeleteNow) {
-                Button("Cancel", role: .cancel) {}
-                Button("Delete", role: .destructive) {
-                    let res = CodexProbeCleanup.cleanupNowUserInitiated()
-                    handleCodexCleanupResult(res)
-                }
-            } message: {
-                Text("Removes only Codex probe sessions after validation. If any session doesn’t look like a probe, nothing is deleted.")
+            } header: {
+                Text("Codex")
+            } footer: {
+                Text("Auth-backed tracking is primary for Codex limits. JSONL remains fallback-only for limits, and /status is used as a last resort.")
             }
 
-            // Result summary dialog for Codex (match Claude UX)
-            .alert("Codex Probe Cleanup", isPresented: $showCodexCleanupResult) {
-                Button("Close", role: .cancel) {}
-            } message: {
-                Text(codexCleanupMessage)
+            // Debug visibility
+            Section("Debug") {
+                Toggle("Show system probe sessions for debugging", isOn: $showSystemProbeSessions)
+                    .help("Reveal probe sessions in the Sessions list. Leave OFF for normal use to avoid noise.")
+                Toggle("Show probe sessions in Quota Meter (debug)", isOn: $showProbeSessionsInHUD)
+                    .help("Reveal internal probe sessions in the Quota Meter. Leave OFF for normal use to avoid noise.")
             }
-
-            // Hard-probe result dialog
-	            .alert("Codex /status Probe", isPresented: $showCodexProbeResult) {
-	                Button("Close", role: .cancel) {}
-	            } message: {
-	                Text(codexProbeMessage)
-	                    .font(.system(.body, design: .monospaced))
-	                    .multilineTextAlignment(.leading)
-	            }
-
-
-	            // Debug visibility
-	            sectionHeader("Debug")
-	            Toggle("Show system probe sessions for debugging", isOn: $showSystemProbeSessions)
-	                .toggleStyle(.switch)
-	                .help("Reveal probe sessions in the Sessions list. Leave OFF for normal use to avoid noise.")
-	            Toggle("Show probe sessions in Quota Meter (debug)", isOn: $showProbeSessionsInHUD)
-	                .toggleStyle(.switch)
-	                .help("Reveal internal probe sessions in the Quota Meter. Leave OFF for normal use to avoid noise.")
-
-	        }
-	        .onReceive(NotificationCenter.default.publisher(for: CodexProbeCleanup.didRunCleanupNotification)) { note in
-	            guard let info = note.userInfo as? [String: Any], let status = info["status"] as? String else { return }
-	            let mode = (info["mode"] as? String) ?? "manual"
+        }
+        // Hard-probe result dialog for Claude
+        .alert("Claude /usage Probe", isPresented: $showClaudeProbeResult) {
+            Button("Close", role: .cancel) {}
+        } message: {
+            Text(claudeProbeMessage)
+                .font(.system(.body, design: .monospaced))
+                .multilineTextAlignment(.leading)
+        }
+        .alert("Enable Automatic Cleanup?", isPresented: $showConfirmAutoDelete) {
+            Button("Cancel", role: .cancel) {}
+            Button("Enable", role: .destructive) {
+                claudeProbeCleanupMode = "auto"
+                ClaudeProbeProject.setCleanupMode(.auto)
+                showCleanupFlash("Claude auto-delete enabled. Will remove probe sessions after each probe.", color: .green)
+            }
+        } message: {
+            Text("After each usage probe, only the dedicated Claude probe project is deleted once safety checks verify it contains only probe sessions.")
+        }
+        .alert("Delete Claude Probe Sessions Now?", isPresented: $showConfirmDeleteNow) {
+            Button("Cancel", role: .cancel) {}
+            Button("Delete", role: .destructive) {
+                let res = ClaudeProbeProject.cleanupNowUserInitiated()
+                // Inline feedback moved to a modal summary dialog below
+                handleCleanupResult(res, manual: true)
+            }
+        } message: {
+            Text("Probe sessions are short /usage checks created by Agent Sessions in a dedicated Claude project. This cleanup only removes that probe project after validation, and never touches your normal Claude sessions.")
+        }
+        // Result summary dialog
+        .alert("Claude Probe Cleanup", isPresented: $showClaudeCleanupResult) {
+            Button("Close", role: .cancel) {}
+        } message: {
+            Text(claudeCleanupMessage)
+        }
+        .alert("Enable Automatic Cleanup?", isPresented: $showConfirmCodexAutoDelete) {
+            Button("Cancel", role: .cancel) {}
+            Button("Enable", role: .destructive) {
+                codexProbeCleanupMode = "auto"
+                CodexProbeCleanup.setCleanupMode(.auto)
+                showCleanupFlash("Codex auto-delete enabled. Will remove probe sessions after each probe.", color: .green)
+            }
+        } message: {
+            Text("After each status probe, only Codex probe sessions are deleted once safety checks verify they were created by Agent Sessions.")
+        }
+        .alert("Delete Codex Probe Sessions Now?", isPresented: $showConfirmCodexDeleteNow) {
+            Button("Cancel", role: .cancel) {}
+            Button("Delete", role: .destructive) {
+                let res = CodexProbeCleanup.cleanupNowUserInitiated()
+                handleCodexCleanupResult(res)
+            }
+        } message: {
+            Text("Removes only Codex probe sessions after validation. If any session doesn’t look like a probe, nothing is deleted.")
+        }
+        // Result summary dialog for Codex (match Claude UX)
+        .alert("Codex Probe Cleanup", isPresented: $showCodexCleanupResult) {
+            Button("Close", role: .cancel) {}
+        } message: {
+            Text(codexCleanupMessage)
+        }
+        // Hard-probe result dialog
+        .alert("Codex /status Probe", isPresented: $showCodexProbeResult) {
+            Button("Close", role: .cancel) {}
+        } message: {
+            Text(codexProbeMessage)
+                .font(.system(.body, design: .monospaced))
+                .multilineTextAlignment(.leading)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: CodexProbeCleanup.didRunCleanupNotification)) { note in
+            guard let info = note.userInfo as? [String: Any], let status = info["status"] as? String else { return }
+            let mode = (info["mode"] as? String) ?? "manual"
             if mode == "manual" {
                 var lines: [String] = []
                 switch status {

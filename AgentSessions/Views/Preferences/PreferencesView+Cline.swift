@@ -3,158 +3,144 @@ import AppKit
 
 extension PreferencesView {
     var clineTab: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            Text("Cline").font(.title2).fontWeight(.semibold)
-
+        PreferencesForm {
             if !clineAgentEnabled {
-                PreferenceCallout {
-                    Text("This agent is disabled in General -> Active CLI agents.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            Group {
-                sectionHeader("Cline CLI Binary")
-                VStack(alignment: .leading, spacing: 10) {
-                    labeledRow("Binary Source") {
-                        Picker("", selection: Binding(
-                            get: { clineSettings.binaryPath.isEmpty ? 0 : 1 },
-                            set: { idx in
-                                if idx == 0 {
-                                    clineSettings.setBinaryPath("")
-                                    scheduleClineProbe()
-                                } else {
-                                    pickClineBinary()
-                                }
-                            }
-                        )) {
-                            Text("Auto").tag(0)
-                            Text("Custom").tag(1)
-                        }
-                        .pickerStyle(.segmented)
-                        .frame(maxWidth: 220)
-                        .help("Use the auto-detected Cline CLI or supply a custom path")
-                    }
-
-                    if clineSettings.binaryPath.isEmpty {
-                        HStack {
-                            Text("Detected:").font(.caption)
-                            Text(clineVersionString ?? "unknown").font(.caption).monospaced()
-                        }
-                        if let path = clineResolvedPath {
-                            Text(path).font(.caption2).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
-                        }
-
-                        if clineProbeState == .failure && clineVersionString == nil {
-                            PreferenceCallout {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("Cline CLI not found")
-                                        .font(.caption)
-                                        .fontWeight(.medium)
-                                    Text("Install the Cline CLI and ensure `cline` is on PATH. Desktop sessions are found without the CLI when ~/.cline/data/sessions exists.")
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                        }
-
-                        HStack(spacing: 12) {
-                            Button("Check Version") { probeCline() }
-                                .buttonStyle(.bordered)
-                                .help("Query the detected Cline CLI for its version")
-                            Button("Copy Path") {
-                                if let p = clineResolvedPath {
-                                    NSPasteboard.general.clearContents()
-                                    NSPasteboard.general.setString(p, forType: .string)
-                                }
-                            }
-                            .buttonStyle(.bordered)
-                            .help("Copy the detected Cline CLI path to clipboard")
-                            .disabled(clineResolvedPath == nil)
-                            Button("Reveal") {
-                                if let p = clineResolvedPath {
-                                    NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: p)])
-                                }
-                            }
-                            .buttonStyle(.bordered)
-                            .help("Reveal the detected Cline CLI binary in Finder")
-                            .disabled(clineResolvedPath == nil)
-                        }
-                    } else {
-                        HStack(spacing: 10) {
-                            TextField("/path/to/cline", text: Binding(get: { clineSettings.binaryPath }, set: { clineSettings.setBinaryPath($0) }))
-                                .textFieldStyle(.roundedBorder)
-                                .frame(maxWidth: 360)
-                                .onSubmit { scheduleClineProbe() }
-                                .onChange(of: clineSettings.binaryPath) { _, _ in scheduleClineProbe() }
-                                .help("Enter the full path to a custom Cline CLI binary")
-                            Button("Choose...", action: pickClineBinary)
-                                .buttonStyle(.borderedProminent)
-                                .help("Select the Cline CLI binary from the filesystem")
-                        }
-                        if !clineSettings.binaryPath.isEmpty, clineProbeState == .failure {
-                            Text("Invalid Cline binary path.")
-                                .font(.caption)
-                                .foregroundStyle(.red)
-                        }
-                    }
-
-                    Text("Cline sessions are browsed locally. Resume in Terminal is not offered for this source.")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-
-                sectionHeader("Sessions Storage")
-                VStack(alignment: .leading, spacing: 10) {
-                    labeledRow("Status") {
-                        let status = AgentEnablement.availabilityStatus(for: .cline)
-                        HStack(spacing: 4) {
-                            Image(systemName: status.isAvailable ? "checkmark.circle.fill" : "xmark.circle")
-                                .foregroundColor(status.isAvailable ? .green : .secondary)
-                            Text(status.statusText)
-                                .font(.caption)
-                        }
-                    }
-
-                    labeledRow("Default Root") {
-                        Text("$CLINE_DATA_DIR/sessions, or ~/.cline/data/sessions")
+                Section {
+                    PreferenceCallout {
+                        Text("This agent is disabled in General -> Active CLI agents.")
                             .font(.caption)
-                            .monospaced()
                             .foregroundStyle(.secondary)
                     }
-
-                    labeledRow("Storage Root") {
-                        HStack(spacing: 10) {
-                            TextField("Custom root (leave empty for default)", text: $clineSessionsPath)
-                                .textFieldStyle(.roundedBorder)
-                                .font(.caption)
-                                .onSubmit {
-                                    validateClineSessionsPath()
-                                    commitClineSessionsPathIfValid()
-                                }
-                                .onChange(of: clineSessionsPath) { _, _ in
-                                    scheduleClineSessionsPathValidation()
-                                }
-                            Button("Choose...", action: pickClineSessionsFolder)
-                                .buttonStyle(.borderedProminent)
-                                .help("Select a Cline sessions directory")
-                        }
-                    }
-
-                    if !clineSessionsPathValid {
-                        Text("Choose an existing directory.")
-                            .font(.caption)
-                            .foregroundStyle(.red)
-                    }
-
-                    Text("Cline writes one directory per session under its sessions root, holding <session-id>.json (the manifest) beside <session-id>.messages.json (the transcript). A custom root overrides both CLINE_DATA_DIR and the fallback path.")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
                 }
             }
 
-            Spacer()
+            Section {
+                Picker("Binary Source", selection: Binding(
+                    get: { clineSettings.binaryPath.isEmpty ? 0 : 1 },
+                    set: { idx in
+                        if idx == 0 {
+                            clineSettings.setBinaryPath("")
+                            scheduleClineProbe()
+                        } else {
+                            pickClineBinary()
+                        }
+                    }
+                )) {
+                    Text("Auto").tag(0)
+                    Text("Custom").tag(1)
+                }
+                .pickerStyle(.segmented)
+                .help("Use the auto-detected Cline CLI or supply a custom path")
+
+                if clineSettings.binaryPath.isEmpty {
+                    LabeledContent("Detected:") {
+                        Text(clineVersionString ?? "unknown").monospaced()
+                    }
+                    if let path = clineResolvedPath {
+                        LabeledContent("Resolved Path") {
+                            Text(path).lineLimit(1).truncationMode(.middle)
+                        }
+                    }
+
+                    if clineProbeState == .failure && clineVersionString == nil {
+                        PreferenceCallout {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Cline CLI not found")
+                                    .font(.caption)
+                                    .fontWeight(.medium)
+                                Text("Install the Cline CLI and ensure `cline` is on PATH. Desktop sessions are found without the CLI when ~/.cline/data/sessions exists.")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+
+                    HStack {
+                        Spacer()
+                        Button("Check Version") { probeCline() }
+                            .help("Query the detected Cline CLI for its version")
+                        Button("Copy Path") {
+                            if let p = clineResolvedPath {
+                                NSPasteboard.general.clearContents()
+                                NSPasteboard.general.setString(p, forType: .string)
+                            }
+                        }
+                        .help("Copy the detected Cline CLI path to clipboard")
+                        .disabled(clineResolvedPath == nil)
+                        Button("Reveal") {
+                            if let p = clineResolvedPath {
+                                NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: p)])
+                            }
+                        }
+                        .help("Reveal the detected Cline CLI binary in Finder")
+                        .disabled(clineResolvedPath == nil)
+                    }
+                } else {
+                    HStack(spacing: 8) {
+                        TextField("/path/to/cline", text: Binding(get: { clineSettings.binaryPath }, set: { clineSettings.setBinaryPath($0) }),
+                                  prompt: Text("/path/to/cline"))
+                            .labelsHidden()
+                            .textFieldStyle(.roundedBorder)
+                            .onSubmit { scheduleClineProbe() }
+                            .onChange(of: clineSettings.binaryPath) { _, _ in scheduleClineProbe() }
+                            .help("Enter the full path to a custom Cline CLI binary")
+                        Button("Choose...", action: pickClineBinary)
+                            .help("Select the Cline CLI binary from the filesystem")
+                    }
+                    if !clineSettings.binaryPath.isEmpty, clineProbeState == .failure {
+                        Text("Invalid Cline binary path.")
+                            .foregroundStyle(.red)
+                    }
+                }
+            } header: {
+                Text("Cline CLI Binary")
+            } footer: {
+                Text("Cline sessions are browsed locally. Resume in Terminal is not offered for this source.")
+            }
+
+            Section {
+                LabeledContent("Status") {
+                    let status = AgentEnablement.availabilityStatus(for: .cline)
+                    HStack(spacing: 4) {
+                        Image(systemName: status.isAvailable ? "checkmark.circle.fill" : "xmark.circle")
+                            .foregroundColor(status.isAvailable ? .green : .secondary)
+                        Text(status.statusText)
+                    }
+                }
+
+                LabeledContent("Default Root") {
+                    Text("$CLINE_DATA_DIR/sessions, or ~/.cline/data/sessions")
+                        .monospaced()
+                }
+
+                LabeledContent {
+                    HStack(spacing: 8) {
+                        TextField("Storage Root", text: $clineSessionsPath, prompt: Text("Custom root (leave empty for default)"))
+                            .labelsHidden()
+                            .textFieldStyle(.roundedBorder)
+                            .onSubmit {
+                                validateClineSessionsPath()
+                                commitClineSessionsPathIfValid()
+                            }
+                            .onChange(of: clineSessionsPath) { _, _ in
+                                scheduleClineSessionsPathValidation()
+                            }
+                        Button("Choose...", action: pickClineSessionsFolder)
+                            .help("Select a Cline sessions directory")
+                    }
+                } label: {
+                    Text("Storage Root")
+                }
+
+                if !clineSessionsPathValid {
+                    Text("Choose an existing directory.")
+                        .foregroundStyle(.red)
+                }
+            } header: {
+                Text("Sessions Storage")
+            } footer: {
+                Text("Cline writes one directory per session under its sessions root, holding <session-id>.json (the manifest) beside <session-id>.messages.json (the transcript). A custom root overrides both CLINE_DATA_DIR and the fallback path.")
+            }
         }
         .onAppear {
             clineSessionsPath = UserDefaults.standard.string(forKey: ClinePreferencesKey.sessionsRootOverride) ?? ""

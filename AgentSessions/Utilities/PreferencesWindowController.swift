@@ -30,6 +30,8 @@ import AppKit
         }
 
         let hv = AppearanceHostingView(rootView: wrapped)
+        // The pane title (navigationTitle) and the split view's toolbar come from SwiftUI.
+        hv.sceneBridgingOptions = [.toolbars, .title]
         hv.onAppearanceChanged = { [weak self] in
             Task { @MainActor in
                 self?.handleEffectiveAppearanceChange()
@@ -38,24 +40,28 @@ import AppKit
 
         let win = NSWindow(
             contentRect: .zero,
-            styleMask: [.titled, .closable, .miniaturizable],
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
+        // System Settings layout: the sidebar runs the full window height under the
+        // traffic lights, and the pane title sits in a unified toolbar over the detail.
+        win.toolbarStyle = .unified
         win.contentView = hv
         win.title = String(localized: "Settings", comment: "Title of the Settings window.")
         win.isReleasedWhenClosed = false
         win.center()
         win.setFrameAutosaveName("PreferencesWindow")
-        let size = NSSize(width: 740, height: 520)
-        win.setContentSize(size)
-        win.contentMinSize = size
+        win.setContentSize(NSSize(width: 800, height: 640))
+        win.contentMinSize = NSSize(width: 800, height: 520)
         win.delegate = self
         self.window = win
         hostingView = hv
         applyAppearance(forceRedraw: false)
         win.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+        // Don't open with the first path field focused, as System Settings doesn't.
+        DispatchQueue.main.async { win.makeFirstResponder(nil) }
 
         distributedObserver = DistributedNotificationCenter.default().addObserver(
             forName: NSNotification.Name("AppleInterfaceThemeChangedNotification"),

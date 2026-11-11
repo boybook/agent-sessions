@@ -3,189 +3,177 @@ import AppKit
 
 extension PreferencesView {
     var droidCLITab: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            Text("Droid").font(.title2).fontWeight(.semibold)
-
+        PreferencesForm {
             if !droidAgentEnabled {
-                PreferenceCallout {
-                    Text("This agent is disabled in General → Active CLI agents.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                Section {
+                    PreferenceCallout {
+                        Text("This agent is disabled in General → Active CLI agents.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
 
-            Group {
-                sectionHeader("Droid CLI Binary")
-                VStack(alignment: .leading, spacing: 10) {
-                    labeledRow("Binary Source") {
-                        Picker("", selection: Binding(
-                            get: { droidSettings.binaryPath.isEmpty ? 0 : 1 },
-                            set: { idx in
-                                if idx == 0 {
-                                    droidSettings.setBinaryPath("")
-                                    scheduleDroidProbe()
-                                } else {
-                                    pickDroidBinary()
-                                }
-                            }
-                        )) {
-                            Text("Auto").tag(0)
-                            Text("Custom").tag(1)
+            Section("Droid CLI Binary") {
+                Picker("Binary Source", selection: Binding(
+                    get: { droidSettings.binaryPath.isEmpty ? 0 : 1 },
+                    set: { idx in
+                        if idx == 0 {
+                            droidSettings.setBinaryPath("")
+                            scheduleDroidProbe()
+                        } else {
+                            pickDroidBinary()
                         }
-                        .pickerStyle(.segmented)
-                        .frame(maxWidth: 220)
-                        .help("Use the auto-detected Droid CLI or supply a custom path")
+                    }
+                )) {
+                    Text("Auto").tag(0)
+                    Text("Custom").tag(1)
+                }
+                .pickerStyle(.segmented)
+                .help("Use the auto-detected Droid CLI or supply a custom path")
+
+                if droidSettings.binaryPath.isEmpty {
+                    LabeledContent {
+                        Text(droidVersionString ?? "unknown").monospaced()
+                    } label: {
+                        Text("Detected:")
+                        if let path = droidResolvedPath {
+                            Text(path).lineLimit(1).truncationMode(.middle)
+                        }
                     }
 
-                    if droidSettings.binaryPath.isEmpty {
-                        HStack {
-                            Text("Detected:").font(.caption)
-                            Text(droidVersionString ?? "unknown").font(.caption).monospaced()
-                        }
-                        if let path = droidResolvedPath {
-                            Text(path).font(.caption2).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
-                        }
-
-                        if droidProbeState == .failure && droidVersionString == nil {
-                            PreferenceCallout {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("Droid CLI not found")
-                                        .font(.caption)
-                                        .fontWeight(.medium)
-                                    Text("Install Droid (Factory CLI) and ensure `droid` is available on your PATH, or set a custom binary path here.")
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                }
+                    if droidProbeState == .failure && droidVersionString == nil {
+                        PreferenceCallout {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Droid CLI not found")
+                                    .font(.caption)
+                                    .fontWeight(.medium)
+                                Text("Install Droid (Factory CLI) and ensure `droid` is available on your PATH, or set a custom binary path here.")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
                             }
                         }
+                    }
 
-                        HStack(spacing: 12) {
-                            Button("Check Version") { probeDroid() }
-                                .buttonStyle(.bordered)
-                                .help("Query the detected Droid CLI for its version")
-                            Button(agentUpdateButtonTitle(for: .droid)) { runAgentUpdateFlow(for: .droid) }
-                                .buttonStyle(.bordered)
-                                .help("Check for a newer Droid CLI version and optionally update it")
-                                .disabled(isAgentUpdateBusy(.droid))
-                            Button("Copy Path") {
-                                if let p = droidResolvedPath {
-                                    NSPasteboard.general.clearContents()
-                                    NSPasteboard.general.setString(p, forType: .string)
-                                }
+                    HStack {
+                        Spacer()
+                        Button("Check Version") { probeDroid() }
+                            .help("Query the detected Droid CLI for its version")
+                        Button(agentUpdateButtonTitle(for: .droid)) { runAgentUpdateFlow(for: .droid) }
+                            .help("Check for a newer Droid CLI version and optionally update it")
+                            .disabled(isAgentUpdateBusy(.droid))
+                        Button("Copy Path") {
+                            if let p = droidResolvedPath {
+                                NSPasteboard.general.clearContents()
+                                NSPasteboard.general.setString(p, forType: .string)
                             }
-                            .buttonStyle(.bordered)
-                            .help("Copy the detected Droid CLI path to clipboard")
-                            .disabled(droidResolvedPath == nil)
-                            Button("Reveal") {
-                                if let p = droidResolvedPath {
-                                    NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: p)])
-                                }
+                        }
+                        .help("Copy the detected Droid CLI path to clipboard")
+                        .disabled(droidResolvedPath == nil)
+                        Button("Reveal") {
+                            if let p = droidResolvedPath {
+                                NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: p)])
                             }
-                            .buttonStyle(.bordered)
-                            .help("Reveal the detected Droid CLI binary in Finder")
-                            .disabled(droidResolvedPath == nil)
                         }
-                    } else {
-                        HStack(spacing: 10) {
-                            TextField("/path/to/droid", text: Binding(get: { droidSettings.binaryPath }, set: { droidSettings.setBinaryPath($0) }))
-                                .textFieldStyle(.roundedBorder)
-                                .frame(maxWidth: 360)
-                                .onSubmit { scheduleDroidProbe() }
-                                .onChange(of: droidSettings.binaryPath) { _, _ in scheduleDroidProbe() }
-                                .help("Enter the full path to a custom Droid CLI binary")
-                            Button("Choose…", action: pickDroidBinary)
-                                .buttonStyle(.borderedProminent)
-                                .help("Select the Droid CLI binary from the filesystem")
-                        }
+                        .help("Reveal the detected Droid CLI binary in Finder")
+                        .disabled(droidResolvedPath == nil)
+                    }
+                } else {
+                    HStack(spacing: 8) {
+                        TextField("/path/to/droid", text: Binding(get: { droidSettings.binaryPath }, set: { droidSettings.setBinaryPath($0) }),
+                                  prompt: Text("/path/to/droid"))
+                            .labelsHidden()
+                            .textFieldStyle(.roundedBorder)
+                            .onSubmit { scheduleDroidProbe() }
+                            .onChange(of: droidSettings.binaryPath) { _, _ in scheduleDroidProbe() }
+                            .help("Enter the full path to a custom Droid CLI binary")
+                        Button("Choose…", action: pickDroidBinary)
+                            .help("Select the Droid CLI binary from the filesystem")
+                    }
 
-                        if droidProbeState == .failure {
-                            Text("Unable to execute the specified binary. Check the path and try again.")
-                                .font(.caption)
-                                .foregroundStyle(.red)
-                        }
+                    if droidProbeState == .failure {
+                        Text("Unable to execute the specified binary. Check the path and try again.")
+                            .foregroundStyle(.red)
                     }
                 }
+            }
+            .disabled(!droidAgentEnabled)
 
-                sectionHeader("Sessions Directory")
-                VStack(alignment: .leading, spacing: 8) {
-                    labeledRow("Storage Root") {
-                        HStack(spacing: 10) {
-                            TextField("~/.factory/sessions", text: $droidSessionsPath)
-                                .textFieldStyle(.roundedBorder)
-                                .frame(maxWidth: 360)
-                                .onSubmit {
+            Section("Sessions Directory") {
+                LabeledContent {
+                    HStack(spacing: 8) {
+                        TextField("Storage Root", text: $droidSessionsPath, prompt: Text("~/.factory/sessions"))
+                            .labelsHidden()
+                            .textFieldStyle(.roundedBorder)
+                            .onSubmit {
+                                validateDroidSessionsPath()
+                                commitDroidSessionsPathIfValid()
+                            }
+                            .onChange(of: droidSessionsPath) { _, _ in
+                                droidSessionsPathDebounce?.cancel()
+                                let work = DispatchWorkItem {
                                     validateDroidSessionsPath()
                                     commitDroidSessionsPathIfValid()
                                 }
-                                .onChange(of: droidSessionsPath) { _, _ in
-                                    droidSessionsPathDebounce?.cancel()
-                                    let work = DispatchWorkItem {
-                                        validateDroidSessionsPath()
-                                        commitDroidSessionsPathIfValid()
-                                    }
-                                    droidSessionsPathDebounce = work
-                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
-                                }
-                                .help("Override where Agent Sessions scans for Droid interactive session JSONL files")
-                            Button("Choose…", action: pickDroidSessionsFolder)
-                                .buttonStyle(.borderedProminent)
-                                .help("Pick a folder to scan for Droid sessions")
-                        }
+                                droidSessionsPathDebounce = work
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
+                            }
+                            .help("Override where Agent Sessions scans for Droid interactive session JSONL files")
+                        Button("Choose…", action: pickDroidSessionsFolder)
+                            .help("Pick a folder to scan for Droid sessions")
                     }
-
-                    if !droidSessionsPathValid {
-                        Text("Folder does not exist or is not a directory.")
-                            .font(.caption)
-                            .foregroundStyle(.red)
-                    } else {
+                } label: {
+                    Text("Storage Root")
+                    if droidSessionsPathValid {
                         Text("Default: ~/.factory/sessions")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
                     }
                 }
 
-                sectionHeader("Projects Directory")
-                    .padding(.top, 6)
-                VStack(alignment: .leading, spacing: 8) {
-                    labeledRow("Search Root") {
-                        HStack(spacing: 10) {
-                            TextField("~/.factory/projects", text: $droidProjectsPath)
-                                .textFieldStyle(.roundedBorder)
-                                .frame(maxWidth: 360)
-                                .onSubmit {
+                if !droidSessionsPathValid {
+                    Text("Folder does not exist or is not a directory.")
+                        .foregroundStyle(.red)
+                }
+            }
+            .disabled(!droidAgentEnabled)
+
+            Section {
+                LabeledContent {
+                    HStack(spacing: 8) {
+                        TextField("Search Root", text: $droidProjectsPath, prompt: Text("~/.factory/projects"))
+                            .labelsHidden()
+                            .textFieldStyle(.roundedBorder)
+                            .onSubmit {
+                                validateDroidProjectsPath()
+                                commitDroidProjectsPathIfValid()
+                            }
+                            .onChange(of: droidProjectsPath) { _, _ in
+                                droidProjectsPathDebounce?.cancel()
+                                let work = DispatchWorkItem {
                                     validateDroidProjectsPath()
                                     commitDroidProjectsPathIfValid()
                                 }
-                                .onChange(of: droidProjectsPath) { _, _ in
-                                    droidProjectsPathDebounce?.cancel()
-                                    let work = DispatchWorkItem {
-                                        validateDroidProjectsPath()
-                                        commitDroidProjectsPathIfValid()
-                                    }
-                                    droidProjectsPathDebounce = work
-                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
-                                }
-                                .help("Optional: scan for exported droid exec --output-format stream-json logs stored as JSONL")
-                            Button("Choose…", action: pickDroidProjectsFolder)
-                                .buttonStyle(.bordered)
-                                .help("Pick a projects folder to scan for stream-json logs")
-                        }
+                                droidProjectsPathDebounce = work
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
+                            }
+                            .help("Optional: scan for exported droid exec --output-format stream-json logs stored as JSONL")
+                        Button("Choose…", action: pickDroidProjectsFolder)
+                            .help("Pick a projects folder to scan for stream-json logs")
                     }
-
-                    if !droidProjectsPathValid {
-                        Text("Folder does not exist or is not a directory.")
-                            .font(.caption)
-                            .foregroundStyle(.red)
-                    } else {
+                } label: {
+                    Text("Search Root")
+                    if droidProjectsPathValid {
                         Text("Default: ~/.factory/projects (best-effort)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
                     }
-
-                    Text("Agent Sessions will only import files that match Droid’s stream-json schema to avoid false positives.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
+
+                if !droidProjectsPathValid {
+                    Text("Folder does not exist or is not a directory.")
+                        .foregroundStyle(.red)
+                }
+            } header: {
+                Text("Projects Directory")
+            } footer: {
+                Text("Agent Sessions will only import files that match Droid’s stream-json schema to avoid false positives.")
             }
             .disabled(!droidAgentEnabled)
         }
@@ -197,169 +185,159 @@ extension PreferencesView {
 
 extension PreferencesView {
     var openClawCLITab: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            Text("OpenClaw").font(.title2).fontWeight(.semibold)
-
+        PreferencesForm {
             if !openClawAgentEnabled {
-                PreferenceCallout {
-                    Text("This agent is disabled in General → Active CLI agents.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                Section {
+                    PreferenceCallout {
+                        Text("This agent is disabled in General → Active CLI agents.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
 
-            Group {
+            Section {
                 Toggle("Show deleted OpenClaw sessions", isOn: Binding(
                     get: { UserDefaults.standard.bool(forKey: PreferencesKey.Advanced.includeOpenClawDeletedSessions) },
                     set: { UserDefaults.standard.set($0, forKey: PreferencesKey.Advanced.includeOpenClawDeletedSessions) }
                 ))
                 .help("OpenClaw auto-deletes sessions after 30 days. Shown by default with a 'deleted' badge. Disable to hide them.")
+            }
+            .disabled(!openClawAgentEnabled)
 
-                sectionHeader("OpenClaw CLI Binary")
-                VStack(alignment: .leading, spacing: 10) {
-                    labeledRow("Binary Source") {
-                        Picker("", selection: Binding(
-                            get: { openClawBinaryPath.isEmpty ? 0 : 1 },
-                            set: { idx in
-                                if idx == 0 {
-                                    openClawBinaryPath = ""
-                                    validateOpenClawBinaryPath()
-                                    scheduleOpenClawProbe()
-                                } else {
-                                    pickOpenClawBinary()
-                                }
-                            }
-                        )) {
-                            Text("Auto").tag(0)
-                            Text("Custom").tag(1)
+            Section("OpenClaw CLI Binary") {
+                Picker("Binary Source", selection: Binding(
+                    get: { openClawBinaryPath.isEmpty ? 0 : 1 },
+                    set: { idx in
+                        if idx == 0 {
+                            openClawBinaryPath = ""
+                            validateOpenClawBinaryPath()
+                            scheduleOpenClawProbe()
+                        } else {
+                            pickOpenClawBinary()
                         }
-                        .pickerStyle(.segmented)
-                        .frame(maxWidth: 220)
-                        .help("Use the auto-detected OpenClaw binary or supply a custom path")
+                    }
+                )) {
+                    Text("Auto").tag(0)
+                    Text("Custom").tag(1)
+                }
+                .pickerStyle(.segmented)
+                .help("Use the auto-detected OpenClaw binary or supply a custom path")
+
+                if openClawBinaryPath.isEmpty {
+                    LabeledContent {
+                        Text(openClawVersionString ?? "unknown").monospaced()
+                    } label: {
+                        Text("Detected:")
+                        if let path = openClawResolvedPath {
+                            Text(path).lineLimit(1).truncationMode(.middle)
+                        }
                     }
 
-                    if openClawBinaryPath.isEmpty {
-                        HStack {
-                            Text("Detected:").font(.caption)
-                            Text(openClawVersionString ?? "unknown").font(.caption).monospaced()
+                    if openClawProbeState == .failure && openClawVersionString == nil {
+                        PreferenceCallout {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("OpenClaw CLI not found")
+                                    .font(.caption)
+                                    .fontWeight(.medium)
+                                Text("Install OpenClaw (or clawdbot) and ensure `openclaw`/`clawdbot` is available on PATH, or set a custom binary path.")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
-                        if let path = openClawResolvedPath {
-                            Text(path).font(.caption2).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
-                        }
+                    }
 
-                        if openClawProbeState == .failure && openClawVersionString == nil {
-                            PreferenceCallout {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("OpenClaw CLI not found")
-                                        .font(.caption)
-                                        .fontWeight(.medium)
-                                    Text("Install OpenClaw (or clawdbot) and ensure `openclaw`/`clawdbot` is available on PATH, or set a custom binary path.")
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                }
+                    HStack {
+                        Spacer()
+                        Button("Check Version") { probeOpenClaw() }
+                            .help("Query the detected OpenClaw CLI for its version")
+                        Button(agentUpdateButtonTitle(for: .openclaw)) { runAgentUpdateFlow(for: .openclaw) }
+                            .help("Check for a newer OpenClaw CLI version and optionally update it")
+                            .disabled(isAgentUpdateBusy(.openclaw))
+                        Button("Copy Path") {
+                            if let p = openClawResolvedPath {
+                                NSPasteboard.general.clearContents()
+                                NSPasteboard.general.setString(p, forType: .string)
                             }
                         }
-
-                        HStack(spacing: 12) {
-                            Button("Check Version") { probeOpenClaw() }
-                                .buttonStyle(.bordered)
-                                .help("Query the detected OpenClaw CLI for its version")
-                            Button(agentUpdateButtonTitle(for: .openclaw)) { runAgentUpdateFlow(for: .openclaw) }
-                                .buttonStyle(.bordered)
-                                .help("Check for a newer OpenClaw CLI version and optionally update it")
-                                .disabled(isAgentUpdateBusy(.openclaw))
-                            Button("Copy Path") {
-                                if let p = openClawResolvedPath {
-                                    NSPasteboard.general.clearContents()
-                                    NSPasteboard.general.setString(p, forType: .string)
-                                }
+                        .help("Copy the detected OpenClaw binary path to clipboard")
+                        .disabled(openClawResolvedPath == nil)
+                        Button("Reveal") {
+                            if let p = openClawResolvedPath {
+                                NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: p)])
                             }
-                            .buttonStyle(.bordered)
-                            .help("Copy the detected OpenClaw binary path to clipboard")
-                            .disabled(openClawResolvedPath == nil)
-                            Button("Reveal") {
-                                if let p = openClawResolvedPath {
-                                    NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: p)])
-                                }
-                            }
-                            .buttonStyle(.bordered)
-                            .help("Reveal the detected OpenClaw binary in Finder")
-                            .disabled(openClawResolvedPath == nil)
                         }
-                    } else {
-                        HStack(spacing: 10) {
-                            TextField("/path/to/openclaw", text: $openClawBinaryPath)
-                                .textFieldStyle(.roundedBorder)
-                                .frame(maxWidth: 360)
-                                .onSubmit {
-                                    validateOpenClawBinaryPath()
-                                    commitOpenClawBinaryPathIfValid()
-                                }
-                                .onChange(of: openClawBinaryPath) { _, _ in
-                                    validateOpenClawBinaryPath()
-                                    commitOpenClawBinaryPathIfValid()
-                                }
-                                .help("Enter the full path to a custom OpenClaw (or clawdbot) binary")
-                            Button("Choose…", action: pickOpenClawBinary)
-                                .buttonStyle(.borderedProminent)
-                                .help("Select the OpenClaw binary from the filesystem")
-                            Button("Clear") {
-                                openClawBinaryPath = ""
+                        .help("Reveal the detected OpenClaw binary in Finder")
+                        .disabled(openClawResolvedPath == nil)
+                    }
+                } else {
+                    HStack(spacing: 8) {
+                        TextField("/path/to/openclaw", text: $openClawBinaryPath, prompt: Text("/path/to/openclaw"))
+                            .labelsHidden()
+                            .textFieldStyle(.roundedBorder)
+                            .onSubmit {
                                 validateOpenClawBinaryPath()
-                                scheduleOpenClawProbe()
+                                commitOpenClawBinaryPathIfValid()
                             }
-                            .buttonStyle(.bordered)
-                            .help("Remove the custom binary override")
+                            .onChange(of: openClawBinaryPath) { _, _ in
+                                validateOpenClawBinaryPath()
+                                commitOpenClawBinaryPathIfValid()
+                            }
+                            .help("Enter the full path to a custom OpenClaw (or clawdbot) binary")
+                        Button("Choose…", action: pickOpenClawBinary)
+                            .help("Select the OpenClaw binary from the filesystem")
+                        Button("Clear") {
+                            openClawBinaryPath = ""
+                            validateOpenClawBinaryPath()
+                            scheduleOpenClawProbe()
                         }
+                        .help("Remove the custom binary override")
+                    }
 
-                        if !openClawBinaryValid {
-                            Text("Must be an executable file.")
-                                .font(.caption)
-                                .foregroundStyle(.red)
-                        } else if openClawProbeState == .failure {
-                            Text("Unable to execute the specified binary. Check the path and try again.")
-                                .font(.caption)
-                                .foregroundStyle(.red)
-                        }
+                    if !openClawBinaryValid {
+                        Text("Must be an executable file.")
+                            .foregroundStyle(.red)
+                    } else if openClawProbeState == .failure {
+                        Text("Unable to execute the specified binary. Check the path and try again.")
+                            .foregroundStyle(.red)
                     }
                 }
+            }
+            .disabled(!openClawAgentEnabled)
 
-                sectionHeader("Sessions Directory")
-                VStack(alignment: .leading, spacing: 8) {
-                    labeledRow("Storage Root") {
-                        HStack(spacing: 10) {
-                            TextField("~/.openclaw", text: $openClawSessionsPath)
-                                .textFieldStyle(.roundedBorder)
-                                .frame(maxWidth: 360)
-                                .onSubmit {
+            Section("Sessions Directory") {
+                LabeledContent {
+                    HStack(spacing: 8) {
+                        TextField("Storage Root", text: $openClawSessionsPath, prompt: Text("~/.openclaw"))
+                            .labelsHidden()
+                            .textFieldStyle(.roundedBorder)
+                            .onSubmit {
+                                validateOpenClawSessionsPath()
+                                commitOpenClawSessionsPathIfValid()
+                            }
+                            .onChange(of: openClawSessionsPath) { _, _ in
+                                openClawSessionsPathDebounce?.cancel()
+                                let work = DispatchWorkItem {
                                     validateOpenClawSessionsPath()
                                     commitOpenClawSessionsPathIfValid()
                                 }
-                                .onChange(of: openClawSessionsPath) { _, _ in
-                                    openClawSessionsPathDebounce?.cancel()
-                                    let work = DispatchWorkItem {
-                                        validateOpenClawSessionsPath()
-                                        commitOpenClawSessionsPathIfValid()
-                                    }
-                                    openClawSessionsPathDebounce = work
-                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
-                                }
-                                .help("Override where Agent Sessions scans for OpenClaw and clawdbot transcripts")
-                            Button("Choose…", action: pickOpenClawSessionsFolder)
-                                .buttonStyle(.borderedProminent)
-                                .help("Pick a folder to scan for OpenClaw sessions")
-                        }
+                                openClawSessionsPathDebounce = work
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
+                            }
+                            .help("Override where Agent Sessions scans for OpenClaw and clawdbot transcripts")
+                        Button("Choose…", action: pickOpenClawSessionsFolder)
+                            .help("Pick a folder to scan for OpenClaw sessions")
                     }
-
-                    if !openClawSessionsPathValid {
-                        Text("Folder does not exist or is not a directory.")
-                            .font(.caption)
-                            .foregroundStyle(.red)
-                    } else {
+                } label: {
+                    Text("Storage Root")
+                    if openClawSessionsPathValid {
                         Text("Default: $OPENCLAW_STATE_DIR, ~/.openclaw, or ~/.clawdbot")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
                     }
+                }
+
+                if !openClawSessionsPathValid {
+                    Text("Folder does not exist or is not a directory.")
+                        .foregroundStyle(.red)
                 }
             }
             .disabled(!openClawAgentEnabled)

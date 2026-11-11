@@ -6,84 +6,72 @@ extension PreferencesView {
     /// no network work. Sessions-root override only, following the Fx/Cline
     /// storage-section shape. The enabled toggle lives in General.
     var deepseekHarnessTab: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            Text("DeepSeek").font(.title2).fontWeight(.semibold)
-
+        PreferencesForm {
             if !deepSeekHarnessAgentEnabled {
-                PreferenceCallout {
-                    Text("This agent is disabled in General -> Active CLI agents.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                Section {
+                    PreferenceCallout {
+                        Text("This agent is disabled in General -> Active CLI agents.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
 
-            Group {
-                sectionHeader("Sessions Storage")
-                VStack(alignment: .leading, spacing: 10) {
-                    labeledRow("Status") {
-                        let status = AgentEnablement.availabilityStatus(for: .deepseekHarness)
-                        HStack(spacing: 4) {
-                            Image(systemName: status.isAvailable ? "checkmark.circle.fill" : "xmark.circle")
-                                .foregroundColor(status.isAvailable ? .green : .secondary)
-                            Text(status.statusText)
-                                .font(.caption)
-                        }
+            Section {
+                LabeledContent("Status") {
+                    let status = AgentEnablement.availabilityStatus(for: .deepseekHarness)
+                    HStack(spacing: 4) {
+                        Image(systemName: status.isAvailable ? "checkmark.circle.fill" : "xmark.circle")
+                            .foregroundColor(status.isAvailable ? .green : .secondary)
+                        Text(status.statusText)
                     }
-
-                    labeledRow("Default Root") {
-                        Text("$DSH_HOME/sessions, or ~/.dsh/sessions")
-                            .font(.caption)
-                            .monospaced()
-                            .foregroundStyle(.secondary)
-                    }
-
-                    labeledRow("Resolved Path") {
-                        Text(resolvedDeepSeekHarnessSessionsPath)
-                            .font(.caption)
-                            .monospaced()
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                    }
-
-                    labeledRow("Storage Root") {
-                        HStack(spacing: 10) {
-                            TextField("Custom root (leave empty for default)", text: $deepSeekHarnessSessionsPath)
-                                .textFieldStyle(.roundedBorder)
-                                .font(.caption)
-                                .onSubmit {
-                                    validateDeepSeekHarnessSessionsPath()
-                                    commitDeepSeekHarnessSessionsPathIfValid()
-                                }
-                                .onChange(of: deepSeekHarnessSessionsPath) { _, _ in
-                                    scheduleDeepSeekHarnessSessionsPathValidation()
-                                }
-                            Button("Choose...", action: pickDeepSeekHarnessSessionsFolder)
-                                .buttonStyle(.borderedProminent)
-                                .help("Select a DeepSeek sessions directory")
-                        }
-                    }
-
-                    if !deepSeekHarnessSessionsPathValid {
-                        Text("Choose an existing directory.")
-                            .font(.caption)
-                            .foregroundStyle(.red)
-                    }
-
-                    Text("Precedence: the override above wins when set and points directly at the sessions root; otherwise the app uses $DSH_HOME/sessions when $DSH_HOME is set, otherwise ~/.dsh/sessions.")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
                 }
 
-                sectionHeader("Limitations")
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("v1 browses and searches local v0–v3 plain (.jsonl) and Zstandard (.jsonl.zstd) generations. Not offered: resume in Terminal, live sessions, DSH archive-state mirroring, attachment-byte lookup, or usage telemetry.")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                LabeledContent("Default Root") {
+                    Text("$DSH_HOME/sessions, or ~/.dsh/sessions")
+                        .monospaced()
                 }
+
+                LabeledContent("Resolved Path") {
+                    Text(resolvedDeepSeekHarnessSessionsPath)
+                        .monospaced()
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+
+                LabeledContent {
+                    HStack(spacing: 8) {
+                        TextField("Storage Root", text: $deepSeekHarnessSessionsPath, prompt: Text("Custom root (leave empty for default)"))
+                            .labelsHidden()
+                            .textFieldStyle(.roundedBorder)
+                            .onSubmit {
+                                validateDeepSeekHarnessSessionsPath()
+                                commitDeepSeekHarnessSessionsPathIfValid()
+                            }
+                            .onChange(of: deepSeekHarnessSessionsPath) { _, _ in
+                                scheduleDeepSeekHarnessSessionsPathValidation()
+                            }
+                        Button("Choose...", action: pickDeepSeekHarnessSessionsFolder)
+                            .help("Select a DeepSeek sessions directory")
+                    }
+                } label: {
+                    Text("Storage Root")
+                }
+
+                if !deepSeekHarnessSessionsPathValid {
+                    Text("Choose an existing directory.")
+                        .foregroundStyle(.red)
+                }
+            } header: {
+                Text("Sessions Storage")
+            } footer: {
+                Text("Precedence: the override above wins when set and points directly at the sessions root; otherwise the app uses $DSH_HOME/sessions when $DSH_HOME is set, otherwise ~/.dsh/sessions.")
             }
 
-            Spacer()
+            Section("Limitations") {
+                Text("v1 browses and searches local v0–v3 plain (.jsonl) and Zstandard (.jsonl.zstd) generations. Not offered: resume in Terminal, live sessions, DSH archive-state mirroring, attachment-byte lookup, or usage telemetry.")
+                    .foregroundStyle(.secondary)
+            }
         }
         .onAppear {
             deepSeekHarnessSessionsPath = UserDefaults.standard.string(forKey: DeepSeekHarnessSettings.Keys.rootOverride) ?? ""

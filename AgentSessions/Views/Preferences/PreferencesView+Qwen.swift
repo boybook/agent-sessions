@@ -3,133 +3,127 @@ import AppKit
 
 extension PreferencesView {
     var qwenTab: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            Text("Qwen Code").font(.title2).fontWeight(.semibold)
-
+        PreferencesForm {
             if !qwenAgentEnabled {
-                PreferenceCallout {
-                    Text("This agent is disabled in General -> Active CLI agents.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                Section {
+                    PreferenceCallout {
+                        Text("This agent is disabled in General -> Active CLI agents.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
 
-            Group {
-                sectionHeader("Qwen Code Binary")
-                VStack(alignment: .leading, spacing: 10) {
-                    labeledRow("Binary Source") {
-                        Picker("", selection: Binding(
-                            get: { qwenSettings.binaryPath.isEmpty ? 0 : 1 },
-                            set: { value in
-                                if value == 0 {
-                                    qwenSettings.setBinaryPath("")
-                                    scheduleQwenProbe()
-                                } else {
-                                    pickQwenBinary()
-                                }
-                            }
-                        )) {
-                            Text("Auto").tag(0)
-                            Text("Custom").tag(1)
-                        }
-                        .pickerStyle(.segmented)
-                        .frame(maxWidth: 220)
-                    }
-
-                    if qwenSettings.binaryPath.isEmpty {
-                        HStack {
-                            Text("Detected:").font(.caption)
-                            Text(qwenVersionString ?? "unknown").font(.caption).monospaced()
-                        }
-                        if let path = qwenResolvedPath {
-                            Text(path).font(.caption2).foregroundStyle(.secondary)
-                                .lineLimit(1).truncationMode(.middle)
-                        }
-                        if qwenProbeState == .failure && qwenVersionString == nil {
-                            PreferenceCallout {
-                                Text("Qwen Code was not found. Ensure `qwen` is on PATH.")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        HStack(spacing: 12) {
-                            Button("Check Version") { probeQwen() }.buttonStyle(.bordered)
-                            Button("Copy Path") {
-                                if let path = qwenResolvedPath {
-                                    NSPasteboard.general.clearContents()
-                                    NSPasteboard.general.setString(path, forType: .string)
-                                }
-                            }
-                            .buttonStyle(.bordered)
-                            .disabled(qwenResolvedPath == nil)
-                            Button("Reveal") {
-                                if let path = qwenResolvedPath {
-                                    NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
-                                }
-                            }
-                            .buttonStyle(.bordered)
-                            .disabled(qwenResolvedPath == nil)
-                        }
-                    } else {
-                        HStack(spacing: 10) {
-                            TextField("/path/to/qwen", text: Binding(
-                                get: { qwenSettings.binaryPath },
-                                set: { qwenSettings.setBinaryPath($0) }
-                            ))
-                            .textFieldStyle(.roundedBorder)
-                            .frame(maxWidth: 360)
-                            .onSubmit { scheduleQwenProbe() }
-                            .onChange(of: qwenSettings.binaryPath) { _, _ in scheduleQwenProbe() }
-                            Button("Choose...", action: pickQwenBinary).buttonStyle(.borderedProminent)
-                        }
-                        if qwenProbeState == .failure {
-                            Text("Invalid Qwen Code binary path.").font(.caption).foregroundStyle(.red)
+            Section {
+                Picker("Binary Source", selection: Binding(
+                    get: { qwenSettings.binaryPath.isEmpty ? 0 : 1 },
+                    set: { value in
+                        if value == 0 {
+                            qwenSettings.setBinaryPath("")
+                            scheduleQwenProbe()
+                        } else {
+                            pickQwenBinary()
                         }
                     }
-
-                    Text("Active chats use the installed CLI's advertised `--resume <id>` command, with `--continue` only when the session working directory is known. Archived chats remain browsable and searchable, but Qwen cannot resume them in place.")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                )) {
+                    Text("Auto").tag(0)
+                    Text("Custom").tag(1)
                 }
+                .pickerStyle(.segmented)
 
-                sectionHeader("Sessions Storage")
-                VStack(alignment: .leading, spacing: 10) {
-                    labeledRow("Status") {
-                        let status = AgentEnablement.availabilityStatus(for: .qwen)
-                        HStack(spacing: 4) {
-                            Image(systemName: status.isAvailable ? "checkmark.circle.fill" : "xmark.circle")
-                                .foregroundColor(status.isAvailable ? .green : .secondary)
-                            Text(status.statusText).font(.caption)
+                if qwenSettings.binaryPath.isEmpty {
+                    LabeledContent("Detected:") {
+                        Text(qwenVersionString ?? "unknown").monospaced()
+                    }
+                    if let path = qwenResolvedPath {
+                        LabeledContent("Resolved Path") {
+                            Text(path).lineLimit(1).truncationMode(.middle)
                         }
                     }
-                    labeledRow("Default Root") {
-                        Text("~/.qwen/projects").font(.caption).monospaced().foregroundStyle(.secondary)
-                    }
-                    labeledRow("Storage Root") {
-                        HStack(spacing: 10) {
-                            TextField("Custom root (leave empty for default)", text: $qwenSessionsPath)
-                                .textFieldStyle(.roundedBorder)
+                    if qwenProbeState == .failure && qwenVersionString == nil {
+                        PreferenceCallout {
+                            Text("Qwen Code was not found. Ensure `qwen` is on PATH.")
                                 .font(.caption)
-                                .onSubmit {
-                                    validateQwenSessionsPath()
-                                    commitQwenSessionsPathIfValid()
-                                }
-                                .onChange(of: qwenSessionsPath) { _, _ in scheduleQwenSessionsPathValidation() }
-                            Button("Choose...", action: pickQwenSessionsFolder).buttonStyle(.borderedProminent)
+                                .foregroundStyle(.secondary)
                         }
                     }
-                    if !qwenSessionsPathValid {
-                        Text("Choose an existing directory.").font(.caption).foregroundStyle(.red)
+                    HStack {
+                        Spacer()
+                        Button("Check Version") { probeQwen() }
+                        Button("Copy Path") {
+                            if let path = qwenResolvedPath {
+                                NSPasteboard.general.clearContents()
+                                NSPasteboard.general.setString(path, forType: .string)
+                            }
+                        }
+                        .disabled(qwenResolvedPath == nil)
+                        Button("Reveal") {
+                            if let path = qwenResolvedPath {
+                                NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+                            }
+                        }
+                        .disabled(qwenResolvedPath == nil)
                     }
+                } else {
+                    HStack(spacing: 8) {
+                        TextField("/path/to/qwen", text: Binding(
+                            get: { qwenSettings.binaryPath },
+                            set: { qwenSettings.setBinaryPath($0) }
+                        ), prompt: Text("/path/to/qwen"))
+                        .labelsHidden()
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit { scheduleQwenProbe() }
+                        .onChange(of: qwenSettings.binaryPath) { _, _ in scheduleQwenProbe() }
+                        Button("Choose...", action: pickQwenBinary)
+                    }
+                    if qwenProbeState == .failure {
+                        Text("Invalid Qwen Code binary path.").foregroundStyle(.red)
+                    }
+                }
+            } header: {
+                Text("Qwen Code Binary")
+            } footer: {
+                Text("Active chats use the installed CLI's advertised `--resume <id>` command, with `--continue` only when the session working directory is known. Archived chats remain browsable and searchable, but Qwen cannot resume them in place.")
+            }
+
+            Section {
+                LabeledContent("Status") {
+                    let status = AgentEnablement.availabilityStatus(for: .qwen)
+                    HStack(spacing: 4) {
+                        Image(systemName: status.isAvailable ? "checkmark.circle.fill" : "xmark.circle")
+                            .foregroundColor(status.isAvailable ? .green : .secondary)
+                        Text(status.statusText)
+                    }
+                }
+                LabeledContent("Default Root") {
+                    Text("~/.qwen/projects").monospaced()
+                }
+                LabeledContent {
+                    HStack(spacing: 8) {
+                        TextField("Storage Root", text: $qwenSessionsPath, prompt: Text("Custom root (leave empty for default)"))
+                            .labelsHidden()
+                            .textFieldStyle(.roundedBorder)
+                            .onSubmit {
+                                validateQwenSessionsPath()
+                                commitQwenSessionsPathIfValid()
+                            }
+                            .onChange(of: qwenSessionsPath) { _, _ in scheduleQwenSessionsPathValidation() }
+                        Button("Choose...", action: pickQwenSessionsFolder)
+                    }
+                } label: {
+                    Text("Storage Root")
+                }
+                if !qwenSessionsPathValid {
+                    Text("Choose an existing directory.").foregroundStyle(.red)
+                }
+            } header: {
+                Text("Sessions Storage")
+            } footer: {
+                VStack(alignment: .leading, spacing: 4) {
                     Text("Qwen Code stores one session-ID-named JSONL transcript per session below each project's chats directory. Override this only for a relocated QWEN_HOME or copied projects root. A copied root not named projects remains browse-only because the CLI cannot resolve it for resume.")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
                     Text("QWEN_RUNTIME_DIR is process-local and is not auto-detected. If you use it, choose that runtime directory's projects folder here.")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
                 }
             }
-            Spacer()
         }
         .onAppear { scheduleQwenProbe() }
     }

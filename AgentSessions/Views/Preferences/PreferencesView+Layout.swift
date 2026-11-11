@@ -1,7 +1,22 @@
 import SwiftUI
 
-let labelColumnWidth: CGFloat = 170
+/// One settings pane: a grouped Form, the System Settings layout. Each pane's
+/// top-level children are `Section`s; Form draws the inset groups, row
+/// separators, trailing switches and label/control columns.
+struct PreferencesForm<Content: View>: View {
+    let content: Content
 
+    init(@ViewBuilder content: () -> Content) {
+        self.content = content()
+    }
+
+    var body: some View {
+        Form { content }
+            .formStyle(.grouped)
+    }
+}
+
+/// A Form row: label on the leading edge, control on the trailing edge.
 struct PreferenceKeyValueRow<Content: View>: View {
     let label: LocalizedStringResource
     let content: Content
@@ -12,11 +27,10 @@ struct PreferenceKeyValueRow<Content: View>: View {
     }
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 16) {
-            Text(label)
-                .frame(width: labelColumnWidth, alignment: .leading)
+        LabeledContent {
             content
-                .frame(maxWidth: .infinity, alignment: .leading)
+        } label: {
+            Text(label)
         }
     }
 }
@@ -51,29 +65,13 @@ struct PreferenceCallout<Content: View>: View {
 }
 
 extension PreferencesView {
-    // Shared toggle row for label + switch alignment
+    // Shared toggle row: a Form switch with the help text as its tooltip
     func toggleRow(_ label: LocalizedStringResource, isOn: Binding<Bool>, help: LocalizedStringResource) -> some View {
-        HStack(spacing: 16) {
-            Text(label)
-                .frame(width: labelColumnWidth, alignment: .leading)
-            Toggle("", isOn: isOn)
-                .labelsHidden()
-                .toggleStyle(.switch)
-                .accessibilityLabel(Text(label))
-                .help(Text(help))
-        }
+        Toggle(isOn: isOn) { Text(label) }
+            .help(Text(help))
     }
 
     func labeledRow<Content: View>(_ label: LocalizedStringResource, @ViewBuilder content: () -> Content) -> some View {
         PreferenceKeyValueRow(label: label, content: content)
-    }
-
-    func sectionHeader(_ title: LocalizedStringResource) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title)
-                .font(.headline)
-                .fontWeight(.semibold)
-            Divider()
-        }
     }
 }
