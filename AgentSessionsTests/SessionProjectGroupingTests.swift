@@ -103,6 +103,69 @@ final class SessionProjectGroupingTests: XCTestCase {
         XCTAssertEqual(groups[1].subtitle, "…/home")
     }
 
+    // MARK: Show more
+
+    private let now = Date(timeIntervalSince1970: 1_800_000_000)
+
+    private func dated(_ id: String, cwd: String, hoursAgo: Double) -> Session {
+        let date = now.addingTimeInterval(-hoursAgo * 3600)
+        return Session(id: id, source: .codex, startTime: date, endTime: date, model: "m",
+                       filePath: "/tmp/\(id).jsonl", fileSizeBytes: 1, eventCount: 1, events: [],
+                       cwd: cwd, repoName: nil, lightweightTitle: id)
+    }
+
+    private var utc: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        return calendar
+    }
+
+    func testLongSectionShowsFirstFiveThenAShowMoreRow() throws {
+        let alpha = try repo("alpha")
+        let rows = (0..<8).map { dated("s\($0)", cwd: alpha, hoursAgo: 48 + Double($0)) }
+        let group = try XCTUnwrap(SessionProjectGrouping.build(rows: rows, rowMeta: [:], now: now, calendar: utc).first)
+
+        XCTAssertEqual(group.previewRows.map(\.id), ["s0", "s1", "s2", "s3", "s4"])
+        XCTAssertEqual(group.hiddenSessionCount, 3)
+        XCTAssertEqual(group.rows.count, 8)
+        let more = try XCTUnwrap(group.showMoreRow)
+        XCTAssertTrue(SessionProjectGrouping.isShowMoreRow(more.id))
+        XCTAssertEqual(SessionProjectGrouping.groupID(forShowMoreRow: more.id), group.id)
+        XCTAssertFalse(SessionProjectGrouping.isShowMoreRow("s0"))
+    }
+
+    func testEverySessionFromTodayStaysVisible() throws {
+        let alpha = try repo("alpha")
+        // 7 sessions today (all after midnight UTC), then 3 older ones.
+        let today = (0..<7).map { dated("t\($0)", cwd: alpha, hoursAgo: Double($0) * 0.1) }
+        let older = (0..<3).map { dated("o\($0)", cwd: alpha, hoursAgo: 72 + Double($0)) }
+        let group = try XCTUnwrap(SessionProjectGrouping.build(rows: today + older, rowMeta: [:], now: now, calendar: utc).first)
+
+        XCTAssertEqual(group.previewRows.map(\.id), today.map(\.id))
+        XCTAssertEqual(group.hiddenSessionCount, 3)
+    }
+
+    func testHidingASingleSessionIsNotWorthAShowMoreRow() throws {
+        let alpha = try repo("alpha")
+        let rows = (0..<6).map { dated("s\($0)", cwd: alpha, hoursAgo: 48 + Double($0)) }
+        let group = try XCTUnwrap(SessionProjectGrouping.build(rows: rows, rowMeta: [:], now: now, calendar: utc).first)
+
+        XCTAssertEqual(group.hiddenSessionCount, 0)
+        XCTAssertNil(group.showMoreRow)
+        XCTAssertEqual(group.previewRows.count, 6)
+    }
+
+    func testHiddenParentHidesItsSubagentChildren() throws {
+        let alpha = try repo("alpha")
+        var rows = (0..<7).map { dated("s\($0)", cwd: alpha, hoursAgo: 48 + Double($0)) }
+        rows.insert(dated("child", cwd: alpha, hoursAgo: 60), at: 6) // child of s5, which is hidden
+        let meta = ["child": SubagentRowMeta(depth: 1, hasChildren: false, childCount: 0)]
+        let group = try XCTUnwrap(SessionProjectGrouping.build(rows: rows, rowMeta: meta, now: now, calendar: utc).first)
+
+        XCTAssertEqual(group.previewRows.map(\.id), ["s0", "s1", "s2", "s3", "s4"])
+        XCTAssertEqual(group.hiddenSessionCount, 2)
+    }
+
     func testEmptyRowsProduceNoGroups() {
         XCTAssertTrue(SessionProjectGrouping.build(rows: [], rowMeta: [:]).isEmpty)
     }

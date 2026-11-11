@@ -78,6 +78,39 @@ struct SessionProjectGroupHeader: View {
     }
 }
 
+/// The "Session" cell of a section's "Show N more sessions" placeholder row. The
+/// row sits inside the project's section, so it lines up with the session titles.
+struct SessionProjectGroupShowMoreRow: View {
+    let hiddenCount: Int
+    let showAll: () -> Void
+
+    var body: some View {
+        Button(action: showAll) {
+            HStack(spacing: 4) {
+                Text("Show \(hiddenCount) more sessions")
+                Image(systemName: "chevron.down")
+                    .imageScale(.small)
+            }
+            .foregroundStyle(Color.accentColor)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(Text("Show every session in this project"))
+    }
+}
+
+extension View {
+    /// Blanks a cell on a section's "Show more" placeholder row: only the Session
+    /// column draws there.
+    func blankOnShowMoreRow(_ session: Session) -> some View {
+        let isPlaceholder = SessionProjectGrouping.isShowMoreRow(session.id)
+        return opacity(isPlaceholder ? 0 : 1)
+            .allowsHitTesting(!isPlaceholder)
+            .accessibilityHidden(isPlaceholder)
+    }
+}
+
 /// Persists which project sections are collapsed, keyed by `SessionProjectGroup.id`.
 enum SessionProjectGroupCollapseStore {
     static func load(_ defaults: UserDefaults = .standard) -> Set<String> {

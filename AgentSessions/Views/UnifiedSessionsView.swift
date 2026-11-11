@@ -452,6 +452,15 @@ struct UnifiedSessionsView: View {
         @State private var hierarchyRowMeta: [String: SubagentRowMeta] = [:]
         @State private var sideChatParentContextByID: [String: String] = [:]
         @State private var cachedExpandableParentIDs: Set<String> = []
+        /// Last rows build with every subagent parent expanded: a disclosure click
+        /// re-filters these in place (`applyHierarchyCollapseInPlace`).
+        @State private var expandedHierarchyRows: [Session] = []
+        @State private var expandedHierarchyRowMeta: [String: SubagentRowMeta] = [:]
+        @State private var expandedSideChatParentContextByID: [String: String] = [:]
+        /// Bumped with each in-place disclosure change so only that change animates.
+        @State private var hierarchyDisclosureTick = 0
+        /// The collapsed set the rows were last re-filtered for in place.
+        @State private var inPlaceCollapsedParents: Set<String>? = nil
         // O(1) id -> row lookup, rebuilt alongside cachedRows in the same apply
         // step. Lets per-click paths (handleSelectionChange, selectedSession)
         // avoid an O(n) `cachedRows.first(where:)` scan.
@@ -484,6 +493,9 @@ struct UnifiedSessionsView: View {
     @State private var projectGroups: [SessionProjectGroup] = []
     /// Collapsed project section ids, persisted as newline-separated text.
     @State private var collapsedProjectGroups: Set<String> = SessionProjectGroupCollapseStore.load()
+    /// Project sections showing every session after "Show more". Not persisted:
+    /// collapsing the section returns it to the short preview.
+    @State private var fullyShownProjectGroups: Set<String> = []
     @AppStorage(TranscriptTelemetryPresentation.visibilityKey) private var showSessionInfo = false
     @AppStorage(PreferencesKey.Unified.showTranscriptWindow) private var showTranscriptWindow: Bool = true
     /// macOS 26 toolbar anchoring (issue #92). Held in `@State`, not `@StateObject`,
@@ -737,7 +749,12 @@ struct UnifiedSessionsView: View {
             }
             .onChange(of: collapsedParents) { _, _ in
                 persistCollapsedParents()
-                updateCachedRows()
+                // Disclosure clicks already re-filtered in the same update (so the
+                // Table animates); anything else catches up here.
+                guard inPlaceCollapsedParents != collapsedParents else { return }
+                if !applyHierarchyCollapseInPlace() {
+                    updateCachedRows()
+                }
             }
             // Resolving every row's project can touch the file system the first time,
             // so the switch rebuilds off-main; later rebuilds hit the per-session cache.
@@ -746,6 +763,9 @@ struct UnifiedSessionsView: View {
             }
             .onChange(of: collapsedProjectGroups) { _, newValue in
                 SessionProjectGroupCollapseStore.save(newValue)
+            }
+            .onChange(of: selection) { _, newValue in
+                revealProjectRowIfHidden(newValue)
             }
 
 			let afterUsage = afterLiveFeature
@@ -1120,8 +1140,12 @@ struct UnifiedSessionsView: View {
         let newSessionSources = NewSessionLauncher.availableSources
         if groupSessionsByProject && !projectGroups.isEmpty {
             ForEach(projectGroups) { group in
+                // A truncated section ends in its one-line "Show N more" placeholder row.
+                let shownRows = (group.showMoreRow != nil && !fullyShownProjectGroups.contains(group.id))
+                    ? group.previewRows + [group.showMoreRow!]
+                    : group.rows
                 Section(isExpanded: projectGroupExpansion(group.id)) {
-                    ForEach(group.rows) { TableRow($0) }
+                    ForEach(shownRows) { TableRow($0) }
                 } header: {
                     SessionProjectGroupHeader(
                         group: group,
@@ -1146,17 +1170,74 @@ struct UnifiedSessionsView: View {
         Binding(
             get: { !collapsedProjectGroups.contains(id) },
             set: { expanded in
-                if expanded { collapsedProjectGroups.remove(id) } else { collapsedProjectGroups.insert(id) }
+                if expanded {
+                    collapsedProjectGroups.remove(id)
+                } else {
+                    collapsedProjectGroups.insert(id)
+                    // Reopening starts from the short preview again.
+                    fullyShownProjectGroups.remove(id)
+                }
             }
         )
     }
 
     private func collapseAllProjectGroups() {
         collapsedProjectGroups.formUnion(projectGroups.map(\.id))
+        fullyShownProjectGroups.removeAll()
+    }
+
+    private func showAllSessions(inProjectGroup id: String) {
+        fullyShownProjectGroups.insert(id)
+    }
+
+    /// A session selected from elsewhere (search, image browser, a new session)
+    /// may sit past a section's "Show more": show that section in full.
+    private func revealProjectRowIfHidden(_ id: String?) {
+        guard let id, groupSessionsByProject else { return }
+        for group in projectGroups where group.hiddenSessionCount > 0 && !fullyShownProjectGroups.contains(group.id) {
+            guard group.rows.contains(where: { $0.id == id }) else { continue }
+            if !group.previewRows.contains(where: { $0.id == id }) {
+                fullyShownProjectGroups.insert(group.id)
+            }
+            return
+        }
     }
 
     private func expandAllProjectGroups() {
         collapsedProjectGroups.subtract(projectGroups.map(\.id))
+    }
+
+    /// A subagent disclosure click: re-filter the last expanded rows build in place
+    /// (O(rows) on main) instead of rebuilding the whole list, and commit the rows
+    /// with `hierarchyDisclosureTick` so the Table animates them. False when there
+    /// is nothing to re-filter (search, flat list, no build yet): rebuild instead.
+    private func applyHierarchyCollapseInPlace() -> Bool {
+        guard isHierarchyBrowsing, !expandedHierarchyRows.isEmpty else { return false }
+        let visible = SubagentHierarchyBuilder.visibleRows(
+            expandedHierarchyRows,
+            rowMeta: expandedHierarchyRowMeta,
+            collapsedParents: collapsedParents
+        )
+        var byID: [String: Session] = [:]
+        byID.reserveCapacity(visible.count)
+        for row in visible { byID[row.id] = row }
+        cachedRows = visible
+        cachedRowIDs = visible.map(\.id)
+        cachedVisibleRowIDs = Set(cachedRowIDs)
+        cachedRowByID = byID
+        hierarchyRowMeta = expandedHierarchyRowMeta
+        sideChatParentContextByID = expandedSideChatParentContextByID
+        cachedExpandableParentIDs = Set(visible.compactMap {
+            expandedHierarchyRowMeta[$0.id]?.hasChildren == true ? $0.id : nil
+        })
+        if groupSessionsByProject {
+            projectGroups = SessionProjectGrouping.build(rows: visible, rowMeta: expandedHierarchyRowMeta)
+        }
+        hierarchyDisclosureTick &+= 1
+        inPlaceCollapsedParents = collapsedParents
+        // Selection bookkeeping exactly as after a rebuild.
+        applyRowsOutput(nil)
+        return true
     }
 
     // MARK: New session
@@ -1234,7 +1315,7 @@ struct UnifiedSessionsView: View {
         let showMsgs = columnVisibility.showMsgsColumn
 	        return ZStack(alignment: .bottom) {
 		        Table(of: Session.self, selection: tableSingleSelection, sortOrder: $sortOrder) {
-            TableColumn("★") { cellFavorite(for: $0) }
+            TableColumn("★") { cellFavorite(for: $0).blankOnShowMoreRow($0) }
                 .width(min: showStarColumn ? 24 : 0,
                        ideal: showStarColumn ? 28 : 0,
                        max: showStarColumn ? 32 : 0)
@@ -1247,12 +1328,18 @@ struct UnifiedSessionsView: View {
                         autoSelectEnabled = false
                         focusActiveTerminal(for: s)
                     }
+                    .blankOnShowMoreRow(s)
             }
                 .width(min: showSourceColumn ? 90 : 0,
                        ideal: showSourceColumn ? 100 : 0,
                        max: showSourceColumn ? 120 : 0)
 
             TableColumn("Session", value: \Session.listTitle) { s in
+                if let groupID = SessionProjectGrouping.groupID(forShowMoreRow: s.id) {
+                    SessionProjectGroupShowMoreRow(hiddenCount: s.eventCount) {
+                        showAllSessions(inProjectGroup: groupID)
+                    }
+                } else {
                 SessionTitleCell(
                     session: s,
                     displayTitleOverride: unified.claudeDesktopTitle(for: s),
@@ -1266,6 +1353,8 @@ struct UnifiedSessionsView: View {
                             } else {
                                 collapsedParents.insert(id)
                             }
+                            // Same update as the click, so the rows animate.
+                            _ = applyHierarchyCollapseInPlace()
                         }
                     )
                     .equatable()
@@ -1276,6 +1365,7 @@ struct UnifiedSessionsView: View {
 	                        autoSelectEnabled = false
 	                        NotificationCenter.default.post(name: .collapseInlineSearchIfEmpty, object: nil)
 	                    }
+                }
             }
             .width(min: showTitle ? 160 : 0,
                    ideal: showTitle ? 320 : 0,
@@ -1294,6 +1384,7 @@ struct UnifiedSessionsView: View {
                     .font(.system(size: 13, weight: .regular).monospacedDigit())
                     .foregroundStyle(UnifiedSessionsStyle.timestampColor)
                     .help(helpText)
+                    .blankOnShowMoreRow(s)
             }
             .width(min: showModified ? 120 : 0,
                    ideal: showModified ? 120 : 0,
@@ -1321,6 +1412,7 @@ struct UnifiedSessionsView: View {
                             applyProjectSelection(selection)
                         }
                     }
+                    .blankOnShowMoreRow(s)
             }
             .width(min: showProject ? 120 : 0,
                    ideal: showProject ? 160 : 0,
@@ -1330,6 +1422,7 @@ struct UnifiedSessionsView: View {
                 Text(String(s.messageCount))
                     .font(.system(size: 13, weight: .regular).monospacedDigit())
                     .foregroundStyle(.secondary)
+                    .blankOnShowMoreRow(s)
             }
             .width(min: showMsgs ? 64 : 0,
                    ideal: showMsgs ? 64 : 0,
@@ -1344,6 +1437,7 @@ struct UnifiedSessionsView: View {
                 Text(display)
                     .font(.system(size: 13, weight: .regular).monospacedDigit())
                     .foregroundStyle(.secondary)
+                    .blankOnShowMoreRow(s)
             }
             .width(min: showSizeColumn ? 72 : 0, ideal: showSizeColumn ? 80 : 0, max: showSizeColumn ? 100 : 0)
 
@@ -1352,6 +1446,12 @@ struct UnifiedSessionsView: View {
                 sessionTableRows
 	        }
 	        .id(UnifiedTableIdentityPolicy.tableIdentity(columnLayoutID: columnLayoutID, reorderGeneration: tableReorderGeneration))
+            // Project sections open, close and "Show more" with the system's default
+            // animation. Scoped to those two states, and set here because the split
+            // view around the list clears every other animation (`.transaction`).
+            .animation(.default, value: collapsedProjectGroups)
+            .animation(.default, value: fullyShownProjectGroups)
+            .animation(.default, value: hierarchyDisclosureTick)
 	        .tableStyle(.inset(alternatesRowBackgrounds: false))
             // Transparent table so the flat "sidebar" pane background shows through;
             // system white zebra is dropped (see listPaneBackground).
@@ -2264,7 +2364,6 @@ struct UnifiedSessionsView: View {
             canExpandAll: isHierarchyBrowsing && !collapsedParents.isEmpty,
             collapseAll: { collapseAllHierarchyParents() },
             expandAll: { expandAllHierarchyParents() },
-            groupByProject: $groupSessionsByProject,
             collapseAllProjects: collapseAllProjectGroups,
             expandAllProjects: expandAllProjectGroups,
             pinnedAgents: pinned,
@@ -2692,6 +2791,7 @@ struct UnifiedSessionsView: View {
                     existing: collapsedParents,
                     visibleParentIDs: parentIDs
                 )
+                _ = applyHierarchyCollapseInPlace()
             }
 
             private func expandAllHierarchyParents() {
@@ -2701,6 +2801,7 @@ struct UnifiedSessionsView: View {
                     existing: collapsedParents,
                     visibleParentIDs: currentExpandableParentIDs
                 )
+                _ = applyHierarchyCollapseInPlace()
             }
 
             private func loadPersistedCollapsedParentsIfNeeded() {
@@ -2733,6 +2834,11 @@ struct UnifiedSessionsView: View {
 	                return id
 	            },
 	                    set: { newID in
+						// The "Show more" placeholder row is not a session: picking it shows the rest.
+						if let newID, let groupID = SessionProjectGrouping.groupID(forShowMoreRow: newID) {
+							showAllSessions(inProjectGroup: groupID)
+							return
+						}
 						if let newID {
 							let source = cachedRowByID[newID]?.source
 							selectionTrace("table set newID=\(newID) source=\(source?.rawValue ?? "nil")")
@@ -3286,6 +3392,9 @@ struct UnifiedSessionsView: View {
                 cachedSurfacePillsBySessionID = output.surfacePillsBySessionID
                 cachedFallbackPresenceBySessionKey = output.fallbackPresenceBySessionKey
                 projectGroups = output.projectGroups
+                expandedHierarchyRows = output.expandedRows
+                expandedHierarchyRowMeta = output.expandedRowMeta
+                expandedSideChatParentContextByID = output.expandedSideChatParentContextByID
                 selectNewlyStartedSessionIfPresent()
             }
 
@@ -4854,25 +4963,30 @@ private struct SessionTitleCell: View, Equatable {
             }
             // Disclosure chevron for parents with children
             if let meta = rowMeta, meta.hasChildren {
+                // Chevron and child count are one full-height target: the chevron
+                // alone was a 5x9 pt hit area, and a near miss selected the row
+                // (loading its transcript) instead of toggling it.
                 Button(action: { onToggleExpand?(session.id) }) {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 10, weight: .medium))
-                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
-                        .animation(.easeInOut(duration: 0.15), value: isExpanded)
+                    HStack(spacing: 4) {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 10, weight: .medium))
+                            .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                            .animation(.easeInOut(duration: 0.15), value: isExpanded)
+                            .frame(width: 16)
+                        if meta.hasWorkflowChildren {
+                            Image(systemName: "arrow.triangle.branch")
+                                .font(.system(size: 10, weight: .medium))
+                                .help("Spawned a workflow · \(meta.childCount) agents")
+                                .accessibilityLabel("Spawned a workflow")
+                        }
+                        Text("(\(meta.childCount))")
+                            .font(.system(size: 11, weight: .medium).monospacedDigit())
+                    }
+                    .frame(maxHeight: .infinity)
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .frame(width: 16)
                 .foregroundStyle(.secondary)
-                if meta.hasWorkflowChildren {
-                    Image(systemName: "arrow.triangle.branch")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(.secondary)
-                        .help("Spawned a workflow · \(meta.childCount) agents")
-                        .accessibilityLabel("Spawned a workflow")
-                }
-                Text("(\(meta.childCount))")
-                    .font(.system(size: 11, weight: .medium).monospacedDigit())
-                    .foregroundStyle(.secondary)
             }
 
             if showFlatSubagentMarker {
@@ -5497,7 +5611,6 @@ struct SessionListFilterModel {
     var canExpandAll: Bool
     var collapseAll: () -> Void
     var expandAll: () -> Void
-    var groupByProject: Binding<Bool> = .constant(false)
     var collapseAllProjects: () -> Void = {}
     var expandAllProjects: () -> Void = {}
     /// Codex and Claude, which stay as their own pills in the regular tier.
@@ -5612,18 +5725,22 @@ private struct SessionFiltersMenu: View {
 /// collapse/expand actions that only apply while it is shown.
 private struct SessionHierarchyMenu: View {
     let model: SessionListFilterModel
+    /// Observed here, not read through `model`: nothing else this view draws depends
+    /// on grouping, so a binding alone never re-renders the menu and its checkmark
+    /// went stale after toggling.
+    @AppStorage(PreferencesKey.Unified.groupByProject) private var groupByProject: Bool = false
 
     var body: some View {
         let isOn = model.hierarchy.wrappedValue
         Menu {
             Toggle("Show subagent hierarchy (⇧⌘H)", isOn: model.hierarchy)
-            Toggle("Group by Project", isOn: model.groupByProject)
+            Toggle("Group by Project", isOn: $groupByProject)
             Divider()
             Button("Collapse All", action: model.collapseAll)
                 .disabled(!model.canCollapseAll)
             Button("Expand All", action: model.expandAll)
                 .disabled(!model.canExpandAll)
-            if model.groupByProject.wrappedValue {
+            if groupByProject {
                 Divider()
                 Button("Collapse All Projects", action: model.collapseAllProjects)
                 Button("Expand All Projects", action: model.expandAllProjects)
@@ -5633,6 +5750,10 @@ private struct SessionHierarchyMenu: View {
         } primaryAction: {
             model.hierarchy.wrappedValue.toggle()
         }
+        // A split (primaryAction) toolbar menu builds its items once and never
+        // refreshes them, so checkmarks and enabled states went stale. A new
+        // identity per state makes the toolbar rebuild the menu.
+        .id("\(isOn)|\(groupByProject)|\(model.canCollapseAll)|\(model.canExpandAll)")
         .help(isOn ? "Flat session list (⇧⌘H)" : "Show subagent hierarchy (⇧⌘H)")
     }
 }

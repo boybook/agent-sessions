@@ -276,3 +276,31 @@ enum SubagentHierarchyBuilder {
         return URL(fileURLWithPath: cwd).standardizedFileURL.path
     }
 }
+
+extension SubagentHierarchyBuilder {
+    /// The rows of a fully expanded `build(...)` result (`collapsedParents: []`)
+    /// with every collapsed parent's subtree hidden. Equal to building with
+    /// `collapsedParents`: rows are depth-first and each child has one parent, so
+    /// a subtree is exactly the run of deeper rows after its root. O(rows).
+    static func visibleRows(_ expandedRows: [Session],
+                            rowMeta: [String: SubagentRowMeta],
+                            collapsedParents: Set<String>) -> [Session] {
+        guard !collapsedParents.isEmpty else { return expandedRows }
+        var visible: [Session] = []
+        visible.reserveCapacity(expandedRows.count)
+        // Depth of the collapsed parent whose subtree is being skipped.
+        var hiddenBelowDepth: Int?
+        for row in expandedRows {
+            let depth = rowMeta[row.id]?.depth ?? 0
+            if let limit = hiddenBelowDepth {
+                if depth > limit { continue }
+                hiddenBelowDepth = nil
+            }
+            visible.append(row)
+            if collapsedParents.contains(row.id), rowMeta[row.id]?.hasChildren == true {
+                hiddenBelowDepth = depth
+            }
+        }
+        return visible
+    }
+}

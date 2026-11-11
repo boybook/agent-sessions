@@ -174,28 +174,57 @@ enum SessionRowsBuilder {
         let fallbackPresenceBySessionKey: [String: CodexActivePresence]
         /// Project sections over `cachedRows`; empty unless `RowsInput.groupByProject`.
         let projectGroups: [SessionProjectGroup]
+        /// The rows with every subagent parent expanded, their metadata, and their
+        /// side-chat contexts: a disclosure click re-filters these in place.
+        let expandedRows: [Session]
+        let expandedRowMeta: [String: SubagentRowMeta]
+        let expandedSideChatParentContextByID: [String: String]
     }
 
     /// Build the hierarchy + row-derived state. Pure function — safe to call from
     /// any isolation context (this is what makes it runnable via
     /// `Task.detached`).
     static func build(input: RowsInput) -> RowsOutput {
-        let hierarchyResult = SubagentHierarchyBuilder.build(
+        // Build the hierarchy fully expanded once, then hide collapsed subtrees by a
+        // linear filter. That equals building with `collapsedParents`, and keeps the
+        // expanded rows so a disclosure click can re-filter in place
+        // (`expandedRows`) instead of rebuilding everything.
+        let expandedResult = SubagentHierarchyBuilder.build(
             sessions: input.nextRows,
-            collapsedParents: input.collapsedParents,
+            collapsedParents: [],
             hierarchyEnabled: input.showSubagentHierarchy && !input.searchActive
         )
-        let newRows = hierarchyResult.sessions
+        let newRows = SubagentHierarchyBuilder.visibleRows(
+            expandedResult.sessions,
+            rowMeta: expandedResult.rowMeta,
+            collapsedParents: input.collapsedParents
+        )
+        let hierarchyResult: SubagentHierarchyBuilder.Result
+        if newRows.count == expandedResult.sessions.count {
+            hierarchyResult = expandedResult
+        } else {
+            var visibleMeta: [String: SubagentRowMeta] = [:]
+            visibleMeta.reserveCapacity(newRows.count)
+            for row in newRows { visibleMeta[row.id] = expandedResult.rowMeta[row.id] }
+            hierarchyResult = SubagentHierarchyBuilder.Result(sessions: newRows, rowMeta: visibleMeta)
+        }
 
         let isLargeReorder = UnifiedTableIdentityPolicy.isLargeReorder(
             old: input.previousCachedRows,
             new: newRows
         )
 
-        let sideChatParentContextByID = UnifiedSessionsView.sideChatParentContexts(
-            for: newRows,
+        // Contexts for every expanded row (the in-place re-filter needs them); the
+        // published map keeps only the visible rows.
+        let expandedSideChatParentContextByID = UnifiedSessionsView.sideChatParentContexts(
+            for: expandedResult.sessions,
             allSessions: input.allSessions
         )
+        var sideChatParentContextByID = expandedSideChatParentContextByID
+        if newRows.count != expandedResult.sessions.count {
+            let visibleIDs = Set(newRows.map(\.id))
+            sideChatParentContextByID = sideChatParentContextByID.filter { visibleIDs.contains($0.key) }
+        }
 
         let cachedRowIDs = newRows.map(\.id)
         let cachedVisibleRowIDs = Set(cachedRowIDs)
@@ -214,9 +243,10 @@ enum SessionRowsBuilder {
             cachedExpandableParentIDs = []
         }
 
+        // Every expanded row, so rows revealed by an in-place expand have theirs.
         var surfacePillsBySessionID: [String: [UnifiedSessionsView.CodexSurfacePill]] = [:]
-        surfacePillsBySessionID.reserveCapacity(newRows.count)
-        for row in newRows {
+        surfacePillsBySessionID.reserveCapacity(expandedResult.sessions.count)
+        for row in expandedResult.sessions {
             surfacePillsBySessionID[row.id] = staticSurfacePills(for: row)
         }
 
@@ -272,7 +302,10 @@ enum SessionRowsBuilder {
             isLargeReorder: isLargeReorder,
             surfacePillsBySessionID: surfacePillsBySessionID,
             fallbackPresenceBySessionKey: fallbackPresenceBySessionKey,
-            projectGroups: projectGroups
+            projectGroups: projectGroups,
+            expandedRows: expandedResult.sessions,
+            expandedRowMeta: expandedResult.rowMeta,
+            expandedSideChatParentContextByID: expandedSideChatParentContextByID
         )
     }
 

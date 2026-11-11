@@ -290,6 +290,38 @@
         }
       }
     },
+    "Show %lld more sessions": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show %lld more sessions"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "显示另外 %lld 个会话"
+          }
+        }
+      }
+    },
+    "Show every session in this project": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show every session in this project"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "显示此项目中的所有会话"
+          }
+        }
+      }
+    },
     "The agent a new session starts with. Right-click a project, or use the toolbar menu, to pick another one.": {
       "localizations": {
         "en": {

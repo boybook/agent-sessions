@@ -19,6 +19,15 @@ struct SessionProjectGroup: Identifiable, Sendable {
     /// Agent of the group's most recently modified top-level session (the
     /// "Automatic" choice for New Session).
     let latestSource: SessionSource?
+    /// The rows a section shows before "Show more": the first few sessions plus
+    /// everything from today, in list order. Equals `rows` when nothing is hidden.
+    let previewRows: [Session]
+    /// Top-level sessions left out of `previewRows` (0: nothing to show more of).
+    let hiddenSessionCount: Int
+    /// The one-line "Show N more" row that ends a truncated section: a placeholder
+    /// row, not a session (see `SessionProjectGrouping.isShowMoreRow`). It lives in
+    /// the section itself, so it lines up and spaces like the sessions above it.
+    let showMoreRow: Session?
 
     var isNoProject: Bool { id == SessionProjectGrouping.noProjectID }
 }
@@ -32,8 +41,28 @@ struct SessionProjectGroup: Identifiable, Sendable {
 /// A subagent child (`depth > 0`) stays in its parent's section.
 enum SessionProjectGrouping {
     static let noProjectID = "none"
+    private static let showMorePrefix = "show-more:"
 
-    static func build(rows: [Session], rowMeta: [String: SubagentRowMeta]) -> [SessionProjectGroup] {
+    static func isShowMoreRow(_ id: String) -> Bool { id.hasPrefix(showMorePrefix) }
+
+    /// The project section a "Show more" row belongs to.
+    static func groupID(forShowMoreRow id: String) -> String? {
+        isShowMoreRow(id) ? String(id.dropFirst(showMorePrefix.count)) : nil
+    }
+
+    private static func makeShowMoreRow(groupID: String, hiddenCount: Int) -> Session {
+        let epoch = Date(timeIntervalSince1970: 0)
+        return Session(id: showMorePrefix + groupID, source: .codex, startTime: epoch, endTime: epoch,
+                       model: nil, filePath: "", fileSizeBytes: nil, eventCount: hiddenCount, events: [],
+                       cwd: nil, repoName: nil, lightweightTitle: nil)
+    }
+    /// Sessions a section always shows before "Show more".
+    static let previewMinimum = 5
+
+    static func build(rows: [Session],
+                      rowMeta: [String: SubagentRowMeta],
+                      now: Date = Date(),
+                      calendar: Calendar = .current) -> [SessionProjectGroup] {
         guard !rows.isEmpty else { return [] }
 
         struct Bucket {
@@ -41,39 +70,56 @@ enum SessionProjectGrouping {
             var rows: [Session] = []
             var sessionCount = 0
             var latest: Session?
+            var preview: [Session] = []
+            var hiddenCount = 0
+            var lastTopLevelShown = true
         }
-        var order: [String] = []
-        var buckets: [String: Bucket] = [:]
-        var parentGroupID: String?
+        let startOfToday = calendar.startOfDay(for: now)
+        // Buckets live in an array and are mutated in place by index: copying one out
+        // of a dictionary to update it would copy its row arrays on every row.
+        var buckets: [Bucket] = []
+        var indexByID: [String: Int] = [:]
+        var parentIndex: Int?
 
         for row in rows {
             let depth = rowMeta[row.id]?.depth ?? 0
-            let groupID: String
-            if depth > 0, let parentGroupID {
-                groupID = parentGroupID
+            let index: Int
+            if depth > 0, let parentIndex {
+                index = parentIndex
             } else {
                 let key = projectKey(for: row)
-                groupID = key.id
-                if buckets[groupID] == nil {
-                    buckets[groupID] = Bucket(key: key)
-                    order.append(groupID)
+                if let existing = indexByID[key.id] {
+                    index = existing
+                } else {
+                    index = buckets.count
+                    indexByID[key.id] = index
+                    buckets.append(Bucket(key: key))
                 }
-                parentGroupID = groupID
+                parentIndex = index
             }
-            buckets[groupID]?.rows.append(row)
+
+            buckets[index].rows.append(row)
             if depth == 0 {
-                buckets[groupID]?.sessionCount += 1
-                if let latest = buckets[groupID]?.latest, latest.modifiedAt >= row.modifiedAt {} else {
-                    buckets[groupID]?.latest = row
+                // Preview: the first few sessions and all of today's; a subagent
+                // child follows its parent.
+                let shown = buckets[index].sessionCount < previewMinimum || row.modifiedAt >= startOfToday
+                buckets[index].lastTopLevelShown = shown
+                if !shown { buckets[index].hiddenCount += 1 }
+                buckets[index].sessionCount += 1
+                if (buckets[index].latest?.modifiedAt ?? .distantPast) < row.modifiedAt {
+                    buckets[index].latest = row
                 }
             }
+            if buckets[index].lastTopLevelShown { buckets[index].preview.append(row) }
         }
 
         // Projects that share a name get the shortest parent-path suffix that tells
         // them apart (`…/parent`), formatted like the project filter badge.
         var parentsByTitle: [String: [(id: String, parents: [String])]] = [:]
-        for id in order {
-            guard let identity = buckets[id]?.key.identity, let title = buckets[id]?.key.title else { continue }
+        for bucket in buckets {
+            let id = bucket.key.id
+            guard let identity = bucket.key.identity else { continue }
+            let title = bucket.key.title
             parentsByTitle[title, default: []].append((id, parentComponents(of: identity.canonicalRootPath)))
         }
         var subtitles: [String: String] = [:]
@@ -84,8 +130,8 @@ enum SessionProjectGrouping {
             }
         }
 
-        return order.compactMap { id in
-            guard let bucket = buckets[id] else { return nil }
+        return buckets.map { bucket in
+            let id = bucket.key.id
             let key = bucket.key
             let subtitle = subtitles[id]
             return SessionProjectGroup(
@@ -97,7 +143,11 @@ enum SessionProjectGrouping {
                 },
                 rows: bucket.rows,
                 sessionCount: bucket.sessionCount,
-                latestSource: bucket.latest?.source
+                latestSource: bucket.latest?.source,
+                // Hiding a single session saves nothing: the "Show more" row takes its place.
+                previewRows: bucket.hiddenCount > 1 ? bucket.preview : bucket.rows,
+                hiddenSessionCount: bucket.hiddenCount > 1 ? bucket.hiddenCount : 0,
+                showMoreRow: bucket.hiddenCount > 1 ? makeShowMoreRow(groupID: id, hiddenCount: bucket.hiddenCount) : nil
             )
         }
     }
@@ -130,10 +180,10 @@ enum SessionProjectGrouping {
     }
 
     /// The project a row belongs to. Resolving it can stat `.git` and normalize
-    /// paths, so it is memoized per session id and modification time: a live poll
-    /// re-resolves only the sessions that changed.
+    /// paths, so it is memoized per session id, modification time and working
+    /// directory: a live poll re-resolves only the sessions that changed.
     static func projectKey(for row: Session) -> ProjectKey {
-        let cacheKey = CacheKey(id: row.id, modifiedAt: row.modifiedAt)
+        let cacheKey = CacheKey(id: row.id, modifiedAt: row.modifiedAt, cwd: row.cwd)
         if let cached = keyCache.value(for: cacheKey) { return cached }
         let key = resolveProjectKey(for: row)
         keyCache.store(key, for: cacheKey)
@@ -170,6 +220,7 @@ enum SessionProjectGrouping {
     private struct CacheKey: Hashable {
         let id: String
         let modifiedAt: Date
+        let cwd: String?
     }
 
     private static let keyCache = KeyCache()
