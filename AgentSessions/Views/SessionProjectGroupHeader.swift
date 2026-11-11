@@ -8,6 +8,15 @@ struct SessionProjectGroupHeader: View {
     let filter: (() -> Void)?
     let collapseAll: () -> Void
     let expandAll: () -> Void
+    /// Starts a new session in the project with the given agent; nil when the
+    /// group has no directory to start in (No Project, Desktop chat labels).
+    var startSession: ((SessionSource) -> Void)? = nil
+    /// What a click on ⊕ uses (Settings → General → New Sessions).
+    var defaultSource: SessionSource? = nil
+    /// Every agent offered in the context menu.
+    var sources: [SessionSource] = []
+
+    @State private var isHoveringNew = false
 
     var body: some View {
         HStack(spacing: 6) {
@@ -28,9 +37,32 @@ struct SessionProjectGroupHeader: View {
             Text(group.sessionCount, format: .number)
                 .monospacedDigit()
                 .foregroundStyle(.tertiary)
+            if let startSession, let defaultSource {
+                // Always visible but faint, full strength on hover: a hover-only
+                // control would be undiscoverable.
+                Button { startSession(defaultSource) } label: {
+                    Image(systemName: "plus.circle")
+                        .foregroundStyle(isHoveringNew ? HierarchicalShapeStyle.primary : HierarchicalShapeStyle.tertiary)
+                        .imageScale(.medium)
+                        .padding(.horizontal, 2)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .onHover { isHoveringNew = $0 }
+                .help(Text("New \(defaultSource.displayName) session in \(group.title)"))
+                .accessibilityLabel(Text("New Session"))
+            }
         }
         .contentShape(Rectangle())
         .contextMenu {
+            if let startSession, !sources.isEmpty {
+                Menu("New Session") {
+                    ForEach(sources, id: \.self) { source in
+                        Button(source.displayName) { startSession(source) }
+                    }
+                }
+                Divider()
+            }
             if let filter {
                 Button("Filter by Project: \(group.title)", action: filter)
                 Divider()

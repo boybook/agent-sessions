@@ -55,6 +55,7 @@ final class SessionProjectGroupingTests: XCTestCase {
         XCTAssertEqual(groups.map(\.title), ["alpha", "beta"])
         XCTAssertEqual(groups.map { $0.rows.map(\.id) }, [["a1", "a2"], ["b1", "b2"]])
         XCTAssertEqual(groups.map(\.sessionCount), [2, 2])
+        XCTAssertEqual(groups.map(\.latestSource), [.codex, .codex])
         XCTAssertEqual(groups[0].selection?.identity.canonicalRootPath, alpha)
         XCTAssertNil(groups[0].subtitle)
         // Every row lands in exactly one group.

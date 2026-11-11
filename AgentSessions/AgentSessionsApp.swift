@@ -14,6 +14,7 @@ extension Notification.Name {
     static let navigateToSessionFromCockpit = Notification.Name("AgentSessionsNavigateToSessionFromCockpit")
     static let navigateToSessionEventFromImages = Notification.Name("AgentSessionsNavigateToSessionEventFromImages")
     static let showImagesFromMenu = Notification.Name("AgentSessionsShowImagesFromMenu")
+    static let newSessionFromMenu = Notification.Name("AgentSessionsNewSessionFromMenu")
     static let collapseAllUnifiedSessionGroupsFromMenu = Notification.Name("AgentSessionsCollapseAllUnifiedSessionGroupsFromMenu")
     static let expandAllUnifiedSessionGroupsFromMenu = Notification.Name("AgentSessionsExpandAllUnifiedSessionGroupsFromMenu")
     static let showImagesForInlineImage = Notification.Name("AgentSessionsShowImagesForInlineImage")
@@ -394,6 +395,10 @@ struct AgentSessionsApp: App {
                 }
             }
             CommandGroup(after: .newItem) {
+                Button("New Session…") {
+                    NotificationCenter.default.post(name: .newSessionFromMenu, object: nil)
+                }
+                .keyboardShortcut("n", modifiers: [.command, .shift])
                 Button("Refresh") { unifiedIndexerHolder.unified?.refresh() }.keyboardShortcut("r", modifiers: .command)
             }
             CommandGroup(replacing: .appSettings) { Button("Settings…") { PreferencesWindowController.shared.show(indexer: indexer, updaterController: updaterController) }.keyboardShortcut(",", modifiers: .command) }

@@ -1,6 +1,22 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "%@ CLI was not found. Set its path in Settings.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ CLI was not found. Set its path in Settings."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未找到 %@ CLI。请在设置中指定它的路径。"
+          }
+        }
+      }
+    },
     "%lld selected": {
       "localizations": {
         "en": {
@@ -30,6 +46,70 @@
           "stringUnit": {
             "state": "translated",
             "value": "*粘贴的文本*"
+          }
+        }
+      }
+    },
+    "Choose Folder…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose Folder…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "选择文件夹…"
+          }
+        }
+      }
+    },
+    "Could Not Start a New Session": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could Not Start a New Session"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法新建会话"
+          }
+        }
+      }
+    },
+    "Default Agent": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Default Agent"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "默认智能体"
+          }
+        }
+      }
+    },
+    "Automatic uses the agent of the project's most recent session.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatic uses the agent of the project's most recent session."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "“自动”会沿用该项目最近一次会话所用的智能体。"
           }
         }
       }
@@ -82,6 +162,102 @@
         }
       }
     },
+    "New Session": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "New Session"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "新建会话"
+          }
+        }
+      }
+    },
+    "New Session…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "New Session…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "新建会话…"
+          }
+        }
+      }
+    },
+    "New session in the selected project (⇧⌘N)": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "New session in the selected project (⇧⌘N)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在所选项目中新建会话（⇧⌘N）"
+          }
+        }
+      }
+    },
+    "New %@ session in %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "New %@ session in %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在 %2$@ 中新建 %1$@ 会话"
+          }
+        }
+      }
+    },
+    "New Sessions": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "New Sessions"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "新建会话"
+          }
+        }
+      }
+    },
+    "New sessions open in the Terminal App above, in the project's root folder.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "New sessions open in the Terminal App above, in the project's root folder."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "新会话会在上方选择的终端应用中打开，工作目录为项目根目录。"
+          }
+        }
+      }
+    },
     "No Project": {
       "localizations": {
         "en": {
@@ -94,6 +270,38 @@
           "stringUnit": {
             "state": "translated",
             "value": "无项目"
+          }
+        }
+      }
+    },
+    "No enabled agent can start a session from a terminal.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No enabled agent can start a session from a terminal."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "没有已启用的智能体可以从终端新建会话。"
+          }
+        }
+      }
+    },
+    "The agent a new session starts with. Right-click a project, or use the toolbar menu, to pick another one.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The agent a new session starts with. Right-click a project, or use the toolbar menu, to pick another one."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "新建会话时使用的智能体。右键点按项目，或使用工具栏菜单，可临时选择其他智能体。"
           }
         }
       }

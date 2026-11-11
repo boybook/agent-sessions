@@ -829,6 +829,9 @@ struct UnifiedSessionsView: View {
 					}
 
 					let afterShowImages = afterNavigateFromCockpit
+						.onReceive(NotificationCenter.default.publisher(for: .newSessionFromMenu)) { _ in
+							startNewSession(nil, in: newSessionDirectory())
+						}
 						.onReceive(NotificationCenter.default.publisher(for: .showImagesFromMenu)) { _ in
 							showImagesForSelectedSession(showNoSelectionAlert: true)
 						}
@@ -1113,6 +1116,8 @@ struct UnifiedSessionsView: View {
     /// precomputed with `cachedRows` (`SessionRowsBuilder`), so rendering only reads them.
     @TableRowBuilder<Session>
     private var sessionTableRows: some TableRowContent<Session> {
+        // Read once per pass, not per section.
+        let newSessionSources = NewSessionLauncher.availableSources
         if groupSessionsByProject && !projectGroups.isEmpty {
             ForEach(projectGroups) { group in
                 Section(isExpanded: projectGroupExpansion(group.id)) {
@@ -1122,7 +1127,13 @@ struct UnifiedSessionsView: View {
                         group: group,
                         filter: group.selection.map { selection in { applyProjectSelection(selection) } },
                         collapseAll: collapseAllProjectGroups,
-                        expandAll: expandAllProjectGroups
+                        expandAll: expandAllProjectGroups,
+                        startSession: group.selection.map { selection in
+                            { source in startNewSession(source, in: URL(fileURLWithPath: selection.identity.canonicalRootPath)) }
+                        },
+                        defaultSource: NewSessionLauncher.defaultSource(projectLatest: group.latestSource,
+                                                                       available: newSessionSources),
+                        sources: newSessionSources
                     )
                 }
             }
@@ -1146,6 +1157,74 @@ struct UnifiedSessionsView: View {
 
     private func expandAllProjectGroups() {
         collapsedProjectGroups.subtract(projectGroups.map(\.id))
+    }
+
+    // MARK: New session
+
+    /// Where the toolbar/menu New Session starts: the filtered project, else the
+    /// selected session's project, else its working directory. nil asks for a folder.
+    private func newSessionDirectory() -> URL? {
+        if let selection = unified.projectSelection {
+            return URL(fileURLWithPath: selection.identity.canonicalRootPath)
+        }
+        guard let session = selectedSession else { return nil }
+        if let identity = session.rowProjectIdentity {
+            return URL(fileURLWithPath: identity.canonicalRootPath)
+        }
+        if let cwd = session.cwd, !cwd.isEmpty, FileManager.default.fileExists(atPath: cwd) {
+            return URL(fileURLWithPath: cwd)
+        }
+        return nil
+    }
+
+    /// Starts `source` (nil: the default agent) in `directory` (nil: ask for a folder).
+    private func startNewSession(_ source: SessionSource?, in directory: URL?) {
+        guard let directory = directory ?? NewSessionLauncher.chooseDirectory() else { return }
+        let latest = projectGroups.first { group in
+            group.selection?.identity.canonicalRootPath == directory.path
+        }?.latestSource ?? selectedSession?.source
+        guard let source = source ?? NewSessionLauncher.defaultSource(projectLatest: latest) else {
+            NewSessionLauncher.presentError(NewSessionLauncher.LaunchError(message: String(
+                localized: "No enabled agent can start a session from a terminal.",
+                comment: "Error when starting a new session with no launchable agent enabled.")))
+            return
+        }
+        Task { @MainActor in
+            do {
+                try await NewSessionLauncher.launch(source, in: directory)
+            } catch {
+                NewSessionLauncher.presentError(error)
+            }
+        }
+    }
+
+    /// Selects a session started from here once its transcript reaches the list,
+    /// opening its project section if that is collapsed.
+    private func selectNewlyStartedSessionIfPresent() {
+        guard NewSessionTracker.shared.pending != nil,
+              let created = NewSessionTracker.shared.claim(in: cachedRows) else { return }
+        if let group = projectGroups.first(where: { $0.rows.contains { $0.id == created.id } }) {
+            collapsedProjectGroups.remove(group.id)
+        }
+        setActiveSelection(created.id, source: created.source, userInitiated: true)
+    }
+
+    private var newSessionToolbarMenu: some View {
+        Menu {
+            ForEach(NewSessionLauncher.availableSources, id: \.self) { source in
+                Button(source.displayName) { startNewSession(source, in: newSessionDirectory()) }
+            }
+            Divider()
+            Button("Choose Folder…") {
+                if let directory = NewSessionLauncher.chooseDirectory() { startNewSession(nil, in: directory) }
+            }
+        } label: {
+            Label("New Session", systemImage: "plus")
+        } primaryAction: {
+            startNewSession(nil, in: newSessionDirectory())
+        }
+        .modifier(ToolbarMenuStyle())
+        .help("New session in the selected project (⇧⌘N)")
     }
 
 	    private var listPane: some View {
@@ -2302,6 +2381,8 @@ struct UnifiedSessionsView: View {
     @ViewBuilder
     private var selectedSessionToolbarActions: some View {
 
+            newSessionToolbarMenu
+
             ToolbarIconButton(help: "Resume the selected session in its original CLI (⌃⌘R).") { _ in
                 ToolbarIcon(systemName: "terminal")
             } action: {
@@ -3205,6 +3286,7 @@ struct UnifiedSessionsView: View {
                 cachedSurfacePillsBySessionID = output.surfacePillsBySessionID
                 cachedFallbackPresenceBySessionKey = output.fallbackPresenceBySessionKey
                 projectGroups = output.projectGroups
+                selectNewlyStartedSessionIfPresent()
             }
 
             if let selectedID = selection,

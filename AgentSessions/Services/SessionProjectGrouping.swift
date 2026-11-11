@@ -16,6 +16,9 @@ struct SessionProjectGroup: Identifiable, Sendable {
     let rows: [Session]
     /// Top-level sessions in the group (subagent children not counted).
     let sessionCount: Int
+    /// Agent of the group's most recently modified top-level session (the
+    /// "Automatic" choice for New Session).
+    let latestSource: SessionSource?
 
     var isNoProject: Bool { id == SessionProjectGrouping.noProjectID }
 }
@@ -37,6 +40,7 @@ enum SessionProjectGrouping {
             let key: ProjectKey
             var rows: [Session] = []
             var sessionCount = 0
+            var latest: Session?
         }
         var order: [String] = []
         var buckets: [String: Bucket] = [:]
@@ -57,7 +61,12 @@ enum SessionProjectGrouping {
                 parentGroupID = groupID
             }
             buckets[groupID]?.rows.append(row)
-            if depth == 0 { buckets[groupID]?.sessionCount += 1 }
+            if depth == 0 {
+                buckets[groupID]?.sessionCount += 1
+                if let latest = buckets[groupID]?.latest, latest.modifiedAt >= row.modifiedAt {} else {
+                    buckets[groupID]?.latest = row
+                }
+            }
         }
 
         // Projects that share a name get the shortest parent-path suffix that tells
@@ -87,7 +96,8 @@ enum SessionProjectGrouping {
                     ProjectSelection(identity: $0, displayName: key.title, disambiguationPath: subtitle)
                 },
                 rows: bucket.rows,
-                sessionCount: bucket.sessionCount
+                sessionCount: bucket.sessionCount,
+                latestSource: bucket.latest?.source
             )
         }
     }

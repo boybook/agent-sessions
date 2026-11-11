@@ -159,6 +159,11 @@ enum PreferencesKey {
         static let allowClaudeArchiveRestore = ClaudeArchiveRestore.allowWritesDefaultsKey
     }
 
+    enum NewSession {
+        /// "auto" (the project's most recent agent) or a `SessionSource` raw value.
+        static let defaultAgent = "NewSessionDefaultAgent"
+    }
+
     enum Paths {
         static let codexSessionsRootOverride = "SessionsRootOverride"
         static let claudeSessionsRootOverride = "ClaudeSessionsRootOverride"

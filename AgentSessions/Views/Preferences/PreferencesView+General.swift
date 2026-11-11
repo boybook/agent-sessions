@@ -61,6 +61,24 @@ extension PreferencesView {
             }
 
             Section {
+                Picker(selection: $newSessionDefaultAgent) {
+                    Text("Automatic").tag(NewSessionLauncher.automatic)
+                    Divider()
+                    ForEach(NewSessionLauncher.availableSources, id: \.self) { source in
+                        Text(source.displayName).tag(source.rawValue)
+                    }
+                } label: {
+                    Text("Default Agent")
+                    Text("Automatic uses the agent of the project's most recent session.")
+                }
+                .help("The agent a new session starts with. Right-click a project, or use the toolbar menu, to pick another one.")
+            } header: {
+                Text("New Sessions")
+            } footer: {
+                Text("New sessions open in the Terminal App above, in the project's root folder.")
+            }
+
+            Section {
                 // One row per registry entry, in registry order. The row label is the
                 // descriptor's `shortLabel` ("Codex", "Copilot", "Kimi Code", …) and the
                 // toggle binding comes from `agentEnablementBinding(for:)`'s exhaustive switch.
