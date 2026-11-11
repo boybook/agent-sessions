@@ -131,6 +131,8 @@ enum PreferencesKey {
         static let showArchivedCodexDesktopOnly = "UnifiedShowArchivedCodexDesktopOnly"
         static let showArchivedClaudeDesktopOnly = "UnifiedShowArchivedClaudeDesktopOnly"
         static let collapsedHierarchyParents = "UnifiedCollapsedHierarchyParents"
+        static let groupByProject = "UnifiedGroupByProject"
+        static let collapsedProjectGroups = "UnifiedCollapsedProjectGroups"
         static let skipAgentsPreamble = "SkipAgentsPreamble"
         static let sessionViewAutoScrollTarget = "UnifiedSessionViewAutoScrollTarget"
         static let showCodexToolbarFilter = "UnifiedShowCodexToolbarFilter"

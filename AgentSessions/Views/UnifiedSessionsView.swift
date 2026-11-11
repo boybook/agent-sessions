@@ -479,6 +479,11 @@ struct UnifiedSessionsView: View {
 	@AppStorage("UnifiedShowSizeColumn") private var showSizeColumn: Bool = true
     @AppStorage("UnifiedShowActiveSessionsOnly") private var showActiveSessionsOnly: Bool = false
     @AppStorage(PreferencesKey.Unified.showSubagentHierarchy) private var showSubagentHierarchy: Bool = true
+    @AppStorage(PreferencesKey.Unified.groupByProject) private var groupSessionsByProject: Bool = false
+    /// Project sections over `cachedRows`, built off-main with them (empty when not grouping).
+    @State private var projectGroups: [SessionProjectGroup] = []
+    /// Collapsed project section ids, persisted as newline-separated text.
+    @State private var collapsedProjectGroups: Set<String> = SessionProjectGroupCollapseStore.load()
     @AppStorage(TranscriptTelemetryPresentation.visibilityKey) private var showSessionInfo = false
     @AppStorage(PreferencesKey.Unified.showTranscriptWindow) private var showTranscriptWindow: Bool = true
     /// macOS 26 toolbar anchoring (issue #92). Held in `@State`, not `@StateObject`,
@@ -733,6 +738,14 @@ struct UnifiedSessionsView: View {
             .onChange(of: collapsedParents) { _, _ in
                 persistCollapsedParents()
                 updateCachedRows()
+            }
+            // Resolving every row's project can touch the file system the first time,
+            // so the switch rebuilds off-main; later rebuilds hit the per-session cache.
+            .onChange(of: groupSessionsByProject) { _, _ in
+                updateCachedRowsAsync { _, _ in }
+            }
+            .onChange(of: collapsedProjectGroups) { _, newValue in
+                SessionProjectGroupCollapseStore.save(newValue)
             }
 
 			let afterUsage = afterLiveFeature
@@ -1096,13 +1109,52 @@ struct UnifiedSessionsView: View {
 	        )
 	    }
 
+    /// Flat rows, or one collapsible native section per project. The sections are
+    /// precomputed with `cachedRows` (`SessionRowsBuilder`), so rendering only reads them.
+    @TableRowBuilder<Session>
+    private var sessionTableRows: some TableRowContent<Session> {
+        if groupSessionsByProject && !projectGroups.isEmpty {
+            ForEach(projectGroups) { group in
+                Section(isExpanded: projectGroupExpansion(group.id)) {
+                    ForEach(group.rows) { TableRow($0) }
+                } header: {
+                    SessionProjectGroupHeader(
+                        group: group,
+                        filter: group.selection.map { selection in { applyProjectSelection(selection) } },
+                        collapseAll: collapseAllProjectGroups,
+                        expandAll: expandAllProjectGroups
+                    )
+                }
+            }
+        } else {
+            ForEach(cachedRows) { TableRow($0) }
+        }
+    }
+
+    private func projectGroupExpansion(_ id: String) -> Binding<Bool> {
+        Binding(
+            get: { !collapsedProjectGroups.contains(id) },
+            set: { expanded in
+                if expanded { collapsedProjectGroups.remove(id) } else { collapsedProjectGroups.insert(id) }
+            }
+        )
+    }
+
+    private func collapseAllProjectGroups() {
+        collapsedProjectGroups.formUnion(projectGroups.map(\.id))
+    }
+
+    private func expandAllProjectGroups() {
+        collapsedProjectGroups.subtract(projectGroups.map(\.id))
+    }
+
 	    private var listPane: some View {
 	        let showTitle = columnVisibility.showTitleColumn
 	        let showModified = columnVisibility.showModifiedColumn
         let showProject = columnVisibility.showProjectColumn
         let showMsgs = columnVisibility.showMsgsColumn
 	        return ZStack(alignment: .bottom) {
-		        Table(cachedRows, selection: tableSingleSelection, sortOrder: $sortOrder) {
+		        Table(of: Session.self, selection: tableSingleSelection, sortOrder: $sortOrder) {
             TableColumn("★") { cellFavorite(for: $0) }
                 .width(min: showStarColumn ? 24 : 0,
                        ideal: showStarColumn ? 28 : 0,
@@ -1217,6 +1269,8 @@ struct UnifiedSessionsView: View {
             .width(min: showSizeColumn ? 72 : 0, ideal: showSizeColumn ? 80 : 0, max: showSizeColumn ? 100 : 0)
 
             // Removed separate Refresh column to avoid churn
+	        } rows: {
+                sessionTableRows
 	        }
 	        .id(UnifiedTableIdentityPolicy.tableIdentity(columnLayoutID: columnLayoutID, reorderGeneration: tableReorderGeneration))
 	        .tableStyle(.inset(alternatesRowBackgrounds: false))
@@ -2131,6 +2185,9 @@ struct UnifiedSessionsView: View {
             canExpandAll: isHierarchyBrowsing && !collapsedParents.isEmpty,
             collapseAll: { collapseAllHierarchyParents() },
             expandAll: { expandAllHierarchyParents() },
+            groupByProject: $groupSessionsByProject,
+            collapseAllProjects: collapseAllProjectGroups,
+            expandAllProjects: expandAllProjectGroups,
             pinnedAgents: pinned,
             otherAgents: enabledOtherAgentSpecs,
             isMonochrome: stripMonochrome,
@@ -2156,6 +2213,14 @@ struct UnifiedSessionsView: View {
                 .buttonStyle(.plain)
                 .help(showSubagentHierarchy ? "Flat session list (⇧⌘H)" : "Show subagent hierarchy (⇧⌘H)")
                 .keyboardShortcut("h", modifiers: [.command, .shift])
+
+                Button(action: { groupSessionsByProject.toggle() }) {
+                    Image(systemName: groupSessionsByProject ? "folder.fill" : "folder")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(groupSessionsByProject ? Color.accentColor : .secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Group by Project")
 
                 // Collapse/Expand-all only apply while browsing the subagent
                 // hierarchy, so keep them out of the toolbar entirely in the
@@ -3111,7 +3176,8 @@ struct UnifiedSessionsView: View {
                 searchActive: !query.isEmpty,
                 isHierarchyBrowsing: isHierarchyBrowsing,
                 presences: presencesForFallback,
-                directJoinFallbackKeys: directJoinFallbackKeys
+                directJoinFallbackKeys: directJoinFallbackKeys,
+                groupByProject: groupSessionsByProject
             )
         }
 
@@ -3138,6 +3204,7 @@ struct UnifiedSessionsView: View {
                 cachedRowByID = output.cachedRowByID
                 cachedSurfacePillsBySessionID = output.surfacePillsBySessionID
                 cachedFallbackPresenceBySessionKey = output.fallbackPresenceBySessionKey
+                projectGroups = output.projectGroups
             }
 
             if let selectedID = selection,
@@ -5348,6 +5415,9 @@ struct SessionListFilterModel {
     var canExpandAll: Bool
     var collapseAll: () -> Void
     var expandAll: () -> Void
+    var groupByProject: Binding<Bool> = .constant(false)
+    var collapseAllProjects: () -> Void = {}
+    var expandAllProjects: () -> Void = {}
     /// Codex and Claude, which stay as their own pills in the regular tier.
     var pinnedAgents: [AgentToolbarSpec]
     var otherAgents: [AgentToolbarSpec]
@@ -5465,11 +5535,17 @@ private struct SessionHierarchyMenu: View {
         let isOn = model.hierarchy.wrappedValue
         Menu {
             Toggle("Show subagent hierarchy (⇧⌘H)", isOn: model.hierarchy)
+            Toggle("Group by Project", isOn: model.groupByProject)
             Divider()
             Button("Collapse All", action: model.collapseAll)
                 .disabled(!model.canCollapseAll)
             Button("Expand All", action: model.expandAll)
                 .disabled(!model.canExpandAll)
+            if model.groupByProject.wrappedValue {
+                Divider()
+                Button("Collapse All Projects", action: model.collapseAllProjects)
+                Button("Expand All Projects", action: model.expandAllProjects)
+            }
         } label: {
             Label("Show subagent hierarchy (⇧⌘H)", systemImage: isOn ? "list.bullet.indent" : "list.bullet")
         } primaryAction: {

@@ -117,6 +117,8 @@ enum SessionRowsBuilder {
         /// and runs here, off-main (W7 Task 1 Step 6c).
         let presences: [CodexActivePresence]
         let directJoinFallbackKeys: Set<String>
+        /// Also split the rows into project sections (`RowsOutput.projectGroups`).
+        let groupByProject: Bool
 
         init(nextRows: [Session],
              allSessions: [Session],
@@ -126,7 +128,8 @@ enum SessionRowsBuilder {
              searchActive: Bool,
              isHierarchyBrowsing: Bool,
              presences: [CodexActivePresence],
-             directJoinFallbackKeys: Set<String>) {
+             directJoinFallbackKeys: Set<String>,
+             groupByProject: Bool = false) {
             self.nextRows = nextRows
             self.allSessions = allSessions
             self.previousCachedRows = previousCachedRows
@@ -136,6 +139,7 @@ enum SessionRowsBuilder {
             self.isHierarchyBrowsing = isHierarchyBrowsing
             self.presences = presences
             self.directJoinFallbackKeys = directJoinFallbackKeys
+            self.groupByProject = groupByProject
         }
     }
 
@@ -168,6 +172,8 @@ enum SessionRowsBuilder {
         /// Step 6c; Task 0 fingerprint: `fallbackPresences` span, 43ms/call, 170
         /// samples on main).
         let fallbackPresenceBySessionKey: [String: CodexActivePresence]
+        /// Project sections over `cachedRows`; empty unless `RowsInput.groupByProject`.
+        let projectGroups: [SessionProjectGroup]
     }
 
     /// Build the hierarchy + row-derived state. Pure function — safe to call from
@@ -245,6 +251,16 @@ enum SessionRowsBuilder {
             storeFallbackPresenceCache(signature: fallbackSignature, map: fallbackPresenceBySessionKey)
         }
 
+#if DEBUG
+        let _pgSpan = Perf.begin("projectGroups", thresholdMs: 4, "rows=\(newRows.count)")
+#endif
+        let projectGroups = input.groupByProject
+            ? SessionProjectGrouping.build(rows: newRows, rowMeta: hierarchyResult.rowMeta)
+            : []
+#if DEBUG
+        Perf.end(_pgSpan)
+#endif
+
         return RowsOutput(
             cachedRows: newRows,
             hierarchyRowMeta: hierarchyResult.rowMeta,
@@ -255,7 +271,8 @@ enum SessionRowsBuilder {
             cachedRowByID: cachedRowByID,
             isLargeReorder: isLargeReorder,
             surfacePillsBySessionID: surfacePillsBySessionID,
-            fallbackPresenceBySessionKey: fallbackPresenceBySessionKey
+            fallbackPresenceBySessionKey: fallbackPresenceBySessionKey,
+            projectGroups: projectGroups
         )
     }
 
