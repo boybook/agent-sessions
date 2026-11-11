@@ -477,6 +477,8 @@ struct UnifiedSessionsView: View {
         // this stale result must be dropped (superseded, never interleaved).
         @State private var rowsRebuildGeneration: Int = 0
 	@State private var columnLayoutID: UUID = UUID()
+    /// Column widths the user drags; visibility is always derived from the column settings.
+    @State private var columnCustomization = TableColumnCustomization<Session>()
 	// Bumped whenever cachedRows is reassigned as a *wholesale reorder* (same id-set,
 	// different order — i.e. a sort). Feeding this into the Table's .id() forces SwiftUI
 	// to REBUILD the table (O(n)) instead of DIFFING the reorder, whose move-computation
@@ -1308,17 +1310,44 @@ struct UnifiedSessionsView: View {
         .help("New session in the selected project (⇧⌘N)")
     }
 
+    /// Hidden columns are hidden in the table, not just zero wide: a zero-width
+    /// column still built a hosting cell for every row scrolled into view.
+    private var tableColumnCustomization: Binding<TableColumnCustomization<Session>> {
+        Binding(
+            get: {
+                var customization = columnCustomization
+                let visible: [(String, Bool)] = [
+                    (UnifiedTableColumnID.star, showStarColumn),
+                    (UnifiedTableColumnID.agent, showSourceColumn),
+                    (UnifiedTableColumnID.session, columnVisibility.showTitleColumn),
+                    (UnifiedTableColumnID.date, columnVisibility.showModifiedColumn),
+                    (UnifiedTableColumnID.project, columnVisibility.showProjectColumn),
+                    (UnifiedTableColumnID.msgs, columnVisibility.showMsgsColumn),
+                    (UnifiedTableColumnID.size, showSizeColumn),
+                ]
+                for (id, isVisible) in visible {
+                    customization[visibility: id] = isVisible ? .visible : .hidden
+                }
+                return customization
+            },
+            set: { columnCustomization = $0 }
+        )
+    }
+
 	    private var listPane: some View {
 	        let showTitle = columnVisibility.showTitleColumn
 	        let showModified = columnVisibility.showModifiedColumn
         let showProject = columnVisibility.showProjectColumn
         let showMsgs = columnVisibility.showMsgsColumn
 	        return ZStack(alignment: .bottom) {
-		        Table(of: Session.self, selection: tableSingleSelection, sortOrder: $sortOrder) {
+		        Table(of: Session.self, selection: tableSingleSelection, sortOrder: $sortOrder,
+                      columnCustomization: tableColumnCustomization) {
             TableColumn("★") { cellFavorite(for: $0).blankOnShowMoreRow($0) }
                 .width(min: showStarColumn ? 24 : 0,
                        ideal: showStarColumn ? 28 : 0,
                        max: showStarColumn ? 32 : 0)
+                .customizationID(UnifiedTableColumnID.star)
+                .disabledCustomizationBehavior([.reorder, .visibility])
 
             TableColumn("Agent", value: \Session.sourceKey) { s in
                 cellSource(for: s)
@@ -1333,6 +1362,8 @@ struct UnifiedSessionsView: View {
                 .width(min: showSourceColumn ? 90 : 0,
                        ideal: showSourceColumn ? 100 : 0,
                        max: showSourceColumn ? 120 : 0)
+                .customizationID(UnifiedTableColumnID.agent)
+                .disabledCustomizationBehavior([.reorder, .visibility])
 
             TableColumn("Session", value: \Session.listTitle) { s in
                 if let groupID = SessionProjectGrouping.groupID(forShowMoreRow: s.id) {
@@ -1370,6 +1401,8 @@ struct UnifiedSessionsView: View {
             .width(min: showTitle ? 160 : 0,
                    ideal: showTitle ? 320 : 0,
                    max: showTitle ? 2000 : 0)
+            .customizationID(UnifiedTableColumnID.session)
+            .disabledCustomizationBehavior([.reorder, .visibility])
 
             TableColumn("Date", value: \Session.modifiedAt) { s in
                 // Both strings come from DateCellStrings, memoized per (session id,
@@ -1389,6 +1422,8 @@ struct UnifiedSessionsView: View {
             .width(min: showModified ? 120 : 0,
                    ideal: showModified ? 120 : 0,
                    max: showModified ? 140 : 0)
+            .customizationID(UnifiedTableColumnID.date)
+            .disabledCustomizationBehavior([.reorder, .visibility])
 
             TableColumn("Project", value: \Session.rowRepoDisplay) { s in
                 let display: String = {
@@ -1417,6 +1452,8 @@ struct UnifiedSessionsView: View {
             .width(min: showProject ? 120 : 0,
                    ideal: showProject ? 160 : 0,
                    max: showProject ? 240 : 0)
+            .customizationID(UnifiedTableColumnID.project)
+            .disabledCustomizationBehavior([.reorder, .visibility])
 
             TableColumn("Msgs", value: \Session.messageCount) { s in
                 Text(String(s.messageCount))
@@ -1427,6 +1464,8 @@ struct UnifiedSessionsView: View {
             .width(min: showMsgs ? 64 : 0,
                    ideal: showMsgs ? 64 : 0,
                    max: showMsgs ? 80 : 0)
+            .customizationID(UnifiedTableColumnID.msgs)
+            .disabledCustomizationBehavior([.reorder, .visibility])
 
             // File size column
             TableColumn("Size", value: \Session.fileSizeSortKey) { s in
@@ -1440,6 +1479,8 @@ struct UnifiedSessionsView: View {
                     .blankOnShowMoreRow(s)
             }
             .width(min: showSizeColumn ? 72 : 0, ideal: showSizeColumn ? 80 : 0, max: showSizeColumn ? 100 : 0)
+            .customizationID(UnifiedTableColumnID.size)
+            .disabledCustomizationBehavior([.reorder, .visibility])
 
             // Removed separate Refresh column to avoid churn
 	        } rows: {
@@ -3677,7 +3718,9 @@ struct UnifiedSessionsView: View {
             Spacer(minLength: 4)
         }
         .opacity(liveOpacity)
-        .id("source-cell-\(session.id)-\(Self.livePresenceSignature(state: liveState, lastSeenAt: presence?.lastSeenAt))")
+        // Keyed on the live state alone: a session-id key re-created the whole cell
+        // each time the table reused it for another row while scrolling.
+        .id(Self.livePresenceSignature(state: liveState, lastSeenAt: presence?.lastSeenAt))
     }
 
     /// Compact signature of the row's own visible live-state, used to key the
@@ -4767,6 +4810,9 @@ private struct FavoriteStarCell: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        // Not a key-view stop: a focusable button per row changed the window's focus
+        // preferences each time a row scrolled in or out.
+        .focusable(false)
         .help(help)
         .accessibilityLabel(isFavorite ? "Remove from Saved" : "Save")
     }
@@ -4986,6 +5032,7 @@ private struct SessionTitleCell: View, Equatable {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .focusable(false)
                 .foregroundStyle(.secondary)
             }
 
@@ -5073,7 +5120,9 @@ private struct SessionTitleCell: View, Equatable {
                 )
             }
         }
-        .onHover { hover = $0 }
+        // Only Antigravity rows use hover. A hover region on every row made
+        // AppKit re-place one tracking area per visible cell on each scroll frame.
+        .modifier(HoverTrackingIf(enabled: session.source == .antigravity, hover: $hover))
     }
 
     private var displayTitle: String {
@@ -5108,6 +5157,31 @@ private struct AntigravityPreviewRefreshButton: View {
     }
 }
 
+/// `customizationID`s of the session table's columns.
+private enum UnifiedTableColumnID {
+    static let star = "star"
+    static let agent = "agent"
+    static let session = "session"
+    static let date = "date"
+    static let project = "project"
+    static let msgs = "msgs"
+    static let size = "size"
+}
+
+/// `onHover` only where it is used, so other rows carry no tracking area.
+private struct HoverTrackingIf: ViewModifier {
+    let enabled: Bool
+    @Binding var hover: Bool
+
+    func body(content: Content) -> some View {
+        if enabled {
+            content.onHover { hover = $0 }
+        } else {
+            content
+        }
+    }
+}
+
 // Stable cell to prevent Table reuse glitches in Project column
 private struct ProjectCellView: View {
     let id: String
@@ -5127,7 +5201,6 @@ private struct ProjectCellView: View {
                     .truncationMode(.tail)
             }
         }
-        .id("project-cell-\(id)")
     }
 }
 

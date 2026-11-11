@@ -5281,6 +5281,12 @@ final class BlockCardCellView: NSTableCellView, TranscriptRowCell {
 
         let host = NSHostingView(rootView: BlockCardHeader(kind: .meta, timestamp: nil, accent: .secondary))
         host.translatesAutoresizingMaskIntoConstraints = false
+        // Constraints size the header, and it never sits under the toolbar's safe
+        // area. With the defaults, every scroll frame moved the cell, AppKit told the
+        // hosting view its safe area changed, and the update request climbed to the
+        // SwiftUI view hosting this table: the whole window re-ran layout each frame.
+        host.sizingOptions = []
+        host.safeAreaRegions = []
         cardBackground.addSubview(host)
         headerHost = host
 

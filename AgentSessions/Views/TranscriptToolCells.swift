@@ -717,6 +717,7 @@ final class ToolGroupHeaderCellView: ToolCardCellView {
         bodyText.isHidden = true
         host.translatesAutoresizingMaskIntoConstraints = false
         host.sizingOptions = []
+        host.safeAreaRegions = []  // see BlockCardCellView: no per-scroll-frame invalidation
         cardBackground.addSubview(host)
         NSLayoutConstraint.activate([
             host.leadingAnchor.constraint(equalTo: contentLeadingAnchor, constant: CardMetrics.contentLeadingInset),
@@ -822,6 +823,7 @@ final class ToolInvocationCellView: ToolCardCellView {
     private func buildInvocation() {
         linesHost.translatesAutoresizingMaskIntoConstraints = false
         linesHost.sizingOptions = []
+        linesHost.safeAreaRegions = []  // see BlockCardCellView: no per-scroll-frame invalidation
         linesHost.rowMenuProvider = { [weak self] event in self?.menu(for: event) }
         cardBackground.addSubview(linesHost)
 

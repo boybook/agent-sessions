@@ -48,6 +48,7 @@ struct SessionProjectGroupHeader: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .focusable(false)
                 .onHover { isHoveringNew = $0 }
                 .help(Text("New \(defaultSource.displayName) session in \(group.title)"))
                 .accessibilityLabel(Text("New Session"))
@@ -96,6 +97,7 @@ struct SessionProjectGroupShowMoreRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .focusable(false)
         .help(Text("Show every session in this project"))
     }
 }

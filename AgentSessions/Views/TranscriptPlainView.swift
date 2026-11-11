@@ -568,7 +568,11 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
     @State private var findMatches: [Range<String.Index>] = []
     @State private var findCurrentMatchIndex: Int = 0
     @State private var findCurrentRange: NSRange? = nil
-    @FocusState private var isFindFieldFocused: Bool
+    /// Mirrors the find field's focus. The `@FocusState` itself lives in
+    /// `TranscriptFindField`: here it re-evaluated this whole view each time any
+    /// focusable control in the window came or went, i.e. on every table cell
+    /// scrolled into view.
+    @State private var isFindFieldFocused: Bool = false
     @State private var commandRanges: [NSRange] = []
     @State private var userRanges: [NSRange] = []
     @State private var assistantRanges: [NSRange] = []
@@ -1933,21 +1937,15 @@ struct UnifiedTranscriptView<Indexer: SessionIndexerProtocol>: View {
 	            Image(systemName: "magnifyingglass")
 	                .foregroundStyle(.secondary)
 
-            TextField("Find in session", text: $findQueryDraft)
-                .textFieldStyle(.plain)
-                .font(TranscriptToolbarStyle.baseFont)
-                .focused($isFindFieldFocused)
-                .help("Find in session (⌘F)")
-                .onChange(of: findQueryDraft) { _, _ in
-                    performFind(resetIndex: true, shouldJump: true)
-                }
-                .onSubmit {
-                    performFind(resetIndex: false, direction: 1, shouldJump: true)
-                }
-                .onExitCommand {
-                    guard isFindFieldFocused else { return }
-                    handleFindFieldEscape()
-                }
+            TranscriptFindField(
+                text: $findQueryDraft,
+                isFocused: $isFindFieldFocused,
+                onSubmit: { performFind(resetIndex: false, direction: 1, shouldJump: true) },
+                onEscape: { handleFindFieldEscape() }
+            )
+            .onChange(of: findQueryDraft) { _, _ in
+                performFind(resetIndex: true, shouldJump: true)
+            }
 
             Spacer(minLength: 0)
 
@@ -4877,5 +4875,31 @@ private struct ClaudeArchiveRestoreStripControl: View {
             }
         }
         return "Agent Sessions couldn’t update Claude’s session metadata.\n\n\(error.localizedDescription)"
+    }
+}
+
+/// The transcript find field and its focus state, kept out of `UnifiedTranscriptView`
+/// so that focus changes elsewhere in the window only re-evaluate this field.
+private struct TranscriptFindField: View {
+    @Binding var text: String
+    @Binding var isFocused: Bool
+    let onSubmit: () -> Void
+    let onEscape: () -> Void
+    @FocusState private var focus: Bool
+
+    var body: some View {
+        TextField("Find in session", text: $text)
+            .textFieldStyle(.plain)
+            .font(TranscriptToolbarStyle.baseFont)
+            .focused($focus)
+            .help("Find in session (⌘F)")
+            .onSubmit(onSubmit)
+            .onExitCommand {
+                guard focus else { return }
+                onEscape()
+            }
+            .onAppear { if focus != isFocused { focus = isFocused } }
+            .onChange(of: isFocused) { _, wanted in if focus != wanted { focus = wanted } }
+            .onChange(of: focus) { _, focused in if isFocused != focused { isFocused = focused } }
     }
 }
