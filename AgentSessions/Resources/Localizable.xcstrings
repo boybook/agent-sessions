@@ -14722,6 +14722,22 @@
         }
       }
     },
+    "Last Active": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Last Active"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "最近活动"
+          }
+        }
+      }
+    },
     "Last Sync": {
       "localizations": {
         "en": {

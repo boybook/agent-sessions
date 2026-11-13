@@ -376,7 +376,7 @@ extension PreferencesView {
                 .help("Show or hide the Agent source column in the Unified list")
                 Toggle("Message counts", isOn: $columnVisibility.showMsgsColumn)
                     .help("Show or hide message counts in the Sessions list")
-                Toggle("Modified date", isOn: $columnVisibility.showModifiedColumn)
+                Toggle("Last Active", isOn: $columnVisibility.showModifiedColumn)
                     .help("Show or hide the modified date column")
                 Toggle("Size column", isOn: Binding(
                     get: { UserDefaults.standard.object(forKey: PreferencesKey.Unified.showSizeColumn) as? Bool ?? true },

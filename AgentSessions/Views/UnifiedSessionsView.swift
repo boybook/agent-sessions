@@ -218,7 +218,6 @@ private enum CockpitNavigationUserInfoKey {
 
 private enum UnifiedSessionsStyle {
     static let selectionAccent = Color.accentColor
-    static let timestampColor = Color(nsColor: .secondaryLabelColor)
     static let agentPillFill = Color(nsColor: .controlBackgroundColor)
     static let agentPillStroke = Color(nsColor: .separatorColor).opacity(0.35)
     static let agentTabFont = Font.system(size: 12, weight: .medium)
@@ -1404,7 +1403,7 @@ struct UnifiedSessionsView: View {
             .customizationID(UnifiedTableColumnID.session)
             .disabledCustomizationBehavior([.reorder, .visibility])
 
-            TableColumn("Date", value: \Session.modifiedAt) { s in
+            TableColumn("Last Active", value: \Session.modifiedAt) { s in
                 // Both strings come from DateCellStrings, memoized per (session id,
                 // modifiedAt, current minute) -- avoids recomputing the lock-guarded
                 // relative formatter and the absolute Date.FormatStyle string on every
@@ -1415,7 +1414,7 @@ struct UnifiedSessionsView: View {
                 let helpText = (display == .relative) ? strings.absolute : strings.relative
                 Text(primary)
                     .font(.system(size: 13, weight: .regular).monospacedDigit())
-                    .foregroundStyle(UnifiedSessionsStyle.timestampColor)
+                    .foregroundStyle(.secondary)
                     .help(helpText)
                     .blankOnShowMoreRow(s)
             }
