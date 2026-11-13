@@ -60,6 +60,8 @@ extension PreferencesView {
                 Text("Resume")
             }
 
+            TmuxPreferencesSection()
+
             Section {
                 Picker(selection: $newSessionDefaultAgent) {
                     Text("Automatic").tag(NewSessionLauncher.automatic)

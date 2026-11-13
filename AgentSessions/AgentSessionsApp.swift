@@ -14,6 +14,7 @@ extension Notification.Name {
     static let navigateToSessionFromCockpit = Notification.Name("AgentSessionsNavigateToSessionFromCockpit")
     static let navigateToSessionEventFromImages = Notification.Name("AgentSessionsNavigateToSessionEventFromImages")
     static let showImagesFromMenu = Notification.Name("AgentSessionsShowImagesFromMenu")
+    static let showTmuxSessionsWindow = Notification.Name("AgentSessionsShowTmuxSessionsWindow")
     static let newSessionFromMenu = Notification.Name("AgentSessionsNewSessionFromMenu")
     static let collapseAllUnifiedSessionGroupsFromMenu = Notification.Name("AgentSessionsCollapseAllUnifiedSessionGroupsFromMenu")
     static let expandAllUnifiedSessionGroupsFromMenu = Notification.Name("AgentSessionsExpandAllUnifiedSessionGroupsFromMenu")
@@ -41,6 +42,7 @@ enum AppWindowRouter {
     /// This is deliberately independent from the localized window title.
     static let mainWindowIdentifier = "AgentSessionsMainWindow"
     static let savedSessionsWindowIdentifier = "PinnedSessions"
+    static let tmuxSessionsWindowIdentifier = "TmuxSessions"
     static let cockpitWindowIdentifier = "AgentCockpit"
 
     @MainActor static var openAgentSessionsWindow: (() -> Void)?
@@ -422,6 +424,7 @@ struct AgentSessionsApp: App {
                 }
                 .keyboardShortcut("i", modifiers: [.command, .option, .shift])
                 OpenPinnedSessionsWindowButton()
+                OpenTmuxSessionsWindowButton()
                 Divider()
                 // Bind through UserDefaults so it persists; also forward to unified when it changes
                 FavoritesOnlyToggle(unifiedHolder: unifiedIndexerHolder)
@@ -470,6 +473,20 @@ struct AgentSessionsApp: App {
                 }
             }
         }
+
+        Window("tmux Sessions", id: AppWindowRouter.tmuxSessionsWindowIdentifier) {
+            if AppRuntime.isRunningTests {
+                EmptyView()
+            } else {
+                TmuxSessionsView(unified: unifiedIndexerHolder.makeUnified(catalog: catalog))
+                    .environment(activeCodexSessions)
+                    .background(WindowOpenRegistrationView(windowIdentifier: AppWindowRouter.tmuxSessionsWindowIdentifier))
+                    .onAppear {
+                        runSharedLaunchBootstrap(windowLabel: "tmux Sessions window")
+                    }
+            }
+        }
+        .defaultSize(width: 760, height: 420)
 
         Window("Quota Meter", id: AppWindowRouter.cockpitWindowIdentifier) {
             if AppRuntime.isRunningTests {
@@ -634,6 +651,15 @@ private struct AgentCockpitMenu: View {
     }
 
     @AppStorage(PreferencesKey.quotaMeterPlacement) private var placementRaw: String = QuotaMeterPlacement.floating.rawValue
+}
+
+private struct OpenTmuxSessionsWindowButton: View {
+    @Environment(\.openWindow) private var openWindow
+    var body: some View {
+        Button("tmux Sessions") {
+            openWindow(id: AppWindowRouter.tmuxSessionsWindowIdentifier)
+        }
+    }
 }
 
 private struct OpenPinnedSessionsWindowButton: View {

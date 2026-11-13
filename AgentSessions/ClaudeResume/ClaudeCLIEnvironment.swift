@@ -90,11 +90,21 @@ struct ClaudeCLIEnvironment {
 
         let hres = runAndCapture([shell, "-lic", helpCmd], useSafeHome: true)
         let helpOut = (hres.out ?? "") + (hres.err ?? "")
-        // Heuristic: look for flags in help text; if help is non-standard JS output, default to false
-        let supportsResume = helpOut.range(of: "--resume", options: .regularExpression) != nil
-        let supportsContinue = helpOut.range(of: "--continue", options: .regularExpression) != nil
+        let support = Self.flagSupport(helpText: helpOut)
 
-        return .success(ProbeResult(versionString: versionStr, binaryURL: binary, supportsResume: supportsResume, supportsContinue: supportsContinue))
+        return .success(ProbeResult(versionString: versionStr, binaryURL: binary, supportsResume: support.resume, supportsContinue: support.continue))
+    }
+
+    /// Which resume flags `--help` shows. Help naming neither flag is not
+    /// Claude Code's: wrappers such as account switchers print their own help and
+    /// pass other arguments through. Every Claude Code release takes both, so
+    /// such a binary is assumed to support them; a help text that names one flag
+    /// but not the other is taken at its word.
+    static func flagSupport(helpText: String) -> (resume: Bool, continue: Bool) {
+        let resume = helpText.contains("--resume")
+        let `continue` = helpText.contains("--continue")
+        if !resume && !`continue` { return (true, true) }
+        return (resume, `continue`)
     }
 
     // MARK: - Helpers

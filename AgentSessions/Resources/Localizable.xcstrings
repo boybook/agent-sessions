@@ -50,6 +50,70 @@
         }
       }
     },
+    "Agent Sessions reads the tmux screen to show whether an agent is working or idle, in any terminal app.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agent Sessions reads the tmux screen to show whether an agent is working or idle, in any terminal app."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agent Sessions 会读取 tmux 画面来判断智能体是在工作还是空闲，不限终端 App。"
+          }
+        }
+      }
+    },
+    "Any agent still running in it stops.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Any agent still running in it stops."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "其中仍在运行的智能体会被终止。"
+          }
+        }
+      }
+    },
+    "Attached": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Attached"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已连接"
+          }
+        }
+      }
+    },
+    "Check Again": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Check Again"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重新检查"
+          }
+        }
+      }
+    },
     "Choose Folder…": {
       "localizations": {
         "en": {
@@ -62,6 +126,102 @@
           "stringUnit": {
             "state": "translated",
             "value": "选择文件夹…"
+          }
+        }
+      }
+    },
+    "Close %lld tmux sessions?": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Close %lld tmux sessions?"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "关闭 %lld 个 tmux 会话？"
+          }
+        }
+      }
+    },
+    "Close Idle Sessions": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Close Idle Sessions"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "关闭空闲会话"
+          }
+        }
+      }
+    },
+    "Close Session…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Close Session…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "关闭会话…"
+          }
+        }
+      }
+    },
+    "Close tmux session “%@”?": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Close tmux session “%@”?"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "关闭 tmux 会话“%@”？"
+          }
+        }
+      }
+    },
+    "Close tmux sessions started by Agent Sessions that no terminal shows and whose agent is idle or gone": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Close tmux sessions started by Agent Sessions that no terminal shows and whose agent is idle or gone"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "关闭由 Agent Sessions 启动、没有终端连接、且其中智能体空闲或已退出的 tmux 会话"
+          }
+        }
+      }
+    },
+    "Copy Attach Command": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copy Attach Command"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "拷贝连接命令"
           }
         }
       }
@@ -114,6 +274,70 @@
         }
       }
     },
+    "Detached": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Detached"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未连接"
+          }
+        }
+      }
+    },
+    "Each CLI session Agent Sessions starts gets its own tmux session, named “as-” plus the project folder. Closing the terminal window only detaches it; the agent keeps working.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Each CLI session Agent Sessions starts gets its own tmux session, named “as-” plus the project folder. Closing the terminal window only detaches it; the agent keeps working."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agent Sessions 启动的每个 CLI 会话都有自己的 tmux 会话，名称是“as-”加项目文件夹名。关闭终端窗口只会断开连接，智能体会继续工作。"
+          }
+        }
+      }
+    },
+    "Folder": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Folder"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "文件夹"
+          }
+        }
+      }
+    },
+    "From any terminal, including over SSH, “tmux attach -t <name>” reattaches and “tmux ls” lists sessions. Inside tmux, press Control-B then D to detach.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "From any terminal, including over SSH, “tmux attach -t <name>” reattaches and “tmux ls” lists sessions. Inside tmux, press Control-B then D to detach."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在任意终端（包括 SSH 远程登录）中，用“tmux attach -t <名称>”重新连接，用“tmux ls”列出会话。在 tmux 里先按 Control-B 再按 D 可以断开连接。"
+          }
+        }
+      }
+    },
     "Group by Project": {
       "localizations": {
         "en": {
@@ -158,6 +382,102 @@
           "stringUnit": {
             "state": "translated",
             "value": "展开所有项目"
+          }
+        }
+      }
+    },
+    "Homebrew": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Homebrew"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Homebrew"
+          }
+        }
+      }
+    },
+    "Install Homebrew first, then run “brew install tmux” in Terminal. MacPorts users can run “sudo port install tmux”.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Install Homebrew first, then run “brew install tmux” in Terminal. MacPorts users can run “sudo port install tmux”."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请先安装 Homebrew，再在终端中运行“brew install tmux”。使用 MacPorts 的话，可以运行“sudo port install tmux”。"
+          }
+        }
+      }
+    },
+    "Install in Terminal": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Install in Terminal"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在终端中安装"
+          }
+        }
+      }
+    },
+    "Install it with Homebrew:": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Install it with Homebrew:"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "可以用 Homebrew 安装："
+          }
+        }
+      }
+    },
+    "Installing tmux": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Installing tmux"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "tmux 安装说明"
+          }
+        }
+      }
+    },
+    "Manage tmux Sessions…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Manage tmux Sessions…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "管理 tmux 会话…"
           }
         }
       }
@@ -290,6 +610,150 @@
         }
       }
     },
+    "No tmux Sessions": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No tmux Sessions"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "没有 tmux 会话"
+          }
+        }
+      }
+    },
+    "Not started by Agent Sessions": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Not started by Agent Sessions"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "不是由 Agent Sessions 启动的"
+          }
+        }
+      }
+    },
+    "Other": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Other"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "外部"
+          }
+        }
+      }
+    },
+    "Press Return to close.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Press Return to close."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "按回车键关闭。"
+          }
+        }
+      }
+    },
+    "Resume a session or start a new one to run it in tmux.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Resume a session or start a new one to run it in tmux."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "恢复或新建一个会话，它就会在 tmux 中运行。"
+          }
+        }
+      }
+    },
+    "Resume and New Session start agents inside tmux, so they keep running after the terminal window closes.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Resume and New Session start agents inside tmux, so they keep running after the terminal window closes."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "恢复会话和新建会话时，智能体会在 tmux 中启动，关闭终端窗口后仍会继续运行。"
+          }
+        }
+      }
+    },
+    "Resume on a session that is already running brings its tmux pane back instead of starting a second copy. Agent Sessions follows /resume and /branch inside the pane.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Resume on a session that is already running brings its tmux pane back instead of starting a second copy. Agent Sessions follows /resume and /branch inside the pane."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "对正在运行的会话点“恢复”，会直接切回它所在的 tmux 窗格，而不是再启动一份。在窗格里执行 /resume 或 /branch 后，Agent Sessions 也会跟着更新。"
+          }
+        }
+      }
+    },
+    "Run CLI Sessions in tmux": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Run CLI Sessions in tmux"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在 tmux 中运行 CLI 会话"
+          }
+        }
+      }
+    },
+    "Running": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Running"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在运行"
+          }
+        }
+      }
+    },
     "Show %lld more sessions": {
       "localizations": {
         "en": {
@@ -322,6 +786,22 @@
         }
       }
     },
+    "Show in Terminal": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show in Terminal"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在终端中显示"
+          }
+        }
+      }
+    },
     "The agent a new session starts with. Right-click a project, or use the toolbar menu, to pick another one.": {
       "localizations": {
         "en": {
@@ -334,6 +814,38 @@
           "stringUnit": {
             "state": "translated",
             "value": "新建会话时使用的智能体。右键点按项目，或使用工具栏菜单，可临时选择其他智能体。"
+          }
+        }
+      }
+    },
+    "The command exited with status": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The command exited with status"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "命令已退出，状态码"
+          }
+        }
+      }
+    },
+    "Untitled session": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Untitled session"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未命名会话"
           }
         }
       }
@@ -614,6 +1126,102 @@
           "stringUnit": {
             "state": "translated",
             "value": "命令说明"
+          }
+        }
+      }
+    },
+    "tmux": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "tmux"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "tmux"
+          }
+        }
+      }
+    },
+    "tmux Session": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "tmux Session"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "tmux 会话"
+          }
+        }
+      }
+    },
+    "tmux Sessions": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "tmux Sessions"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "tmux 会话"
+          }
+        }
+      }
+    },
+    "tmux is not installed on this Mac.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "tmux is not installed on this Mac."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这台 Mac 上没有安装 tmux。"
+          }
+        }
+      }
+    },
+    "tmux keeps terminal programs running in the background, independent of any terminal window.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "tmux keeps terminal programs running in the background, independent of any terminal window."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "tmux 让终端程序在后台运行，不依赖任何一个终端窗口。"
+          }
+        }
+      }
+    },
+    "tmux was not found. Sessions open without tmux until it is installed.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "tmux was not found. Sessions open without tmux until it is installed."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未找到 tmux。安装之前，会话会照常直接在终端中打开。"
           }
         }
       }

@@ -856,6 +856,9 @@ struct UnifiedSessionsView: View {
 						.onReceive(NotificationCenter.default.publisher(for: .showImagesFromMenu)) { _ in
 							showImagesForSelectedSession(showNoSelectionAlert: true)
 						}
+						.onReceive(NotificationCenter.default.publisher(for: .showTmuxSessionsWindow)) { _ in
+							openWindow(id: AppWindowRouter.tmuxSessionsWindowIdentifier)
+						}
 
                     let afterCollapseAllGroups = afterShowImages
                         .onReceive(NotificationCenter.default.publisher(for: .collapseAllUnifiedSessionGroupsFromMenu)) { _ in
@@ -3870,7 +3873,7 @@ struct UnifiedSessionsView: View {
         return TerminalFocusAvailability(canFocus: canFocus, helpText: helpText)
     }
 
-    private func focusActiveTerminal(for session: Session) {
+    private func focusActiveTerminal(for session: Session, viaTmux: Bool = true) {
         let availability = terminalFocusAvailability(for: session)
         guard availability.canFocus else {
             showActionAlert(message: availability.helpText)
@@ -3878,6 +3881,16 @@ struct UnifiedSessionsView: View {
         }
 
         let presence = livePresence(for: session)
+        // A session running in tmux is shown through tmux: its tty is the pane's,
+        // which no terminal tab owns.
+        if viaTmux, TmuxIntegration.isActive, let tty = presence?.tty {
+            Task { @MainActor in
+                if await !TmuxFocus.showPane(forTTY: tty) {
+                    focusActiveTerminal(for: session, viaTmux: false)
+                }
+            }
+            return
+        }
         if CodexActiveSessionsModel.tryFocusITerm2(
             itermSessionId: presence?.terminal?.itermSessionId,
             tty: presence?.tty
@@ -3999,10 +4012,21 @@ struct UnifiedSessionsView: View {
         }
     }
 
-    private func resume(_ s: Session) {
+    private func resume(_ s: Session, reuseRunningTmuxPane: Bool = true) {
         guard !s.isClaudeWorkflowSubagent else { return }
         guard s.source.descriptor.supportsResume else { return }
         guard s.surface != .acp else { return }
+        // Already running in tmux: show that pane instead of starting a second
+        // process on the same conversation. Looked up by the live process, so a
+        // pane that moved to this conversation with /resume or /branch counts too.
+        if reuseRunningTmuxPane, TmuxIntegration.isActive, let tty = livePresence(for: s)?.tty {
+            Task { @MainActor in
+                if await !TmuxFocus.showPane(forTTY: tty) {
+                    resume(s, reuseRunningTmuxPane: false)
+                }
+            }
+            return
+        }
         // Captured at click time, not at report time. A Warp cold start
         // activates Warp and deactivates us, so by the time a failure comes back
         // (3s later, more if Gatekeeper is verifying) `NSApp.keyWindow` is nil

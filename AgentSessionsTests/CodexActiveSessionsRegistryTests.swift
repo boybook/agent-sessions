@@ -1309,6 +1309,31 @@ final class CodexActiveSessionsRegistryTests: XCTestCase {
         XCTAssertFalse(ids.contains("hashed-path-id"))
     }
 
+    func testLiveSessionIDCandidates_claudeSubagentDoesNotJoinOnItsParentsID() {
+        // A subagent transcript's lines carry the parent's sessionId, which the
+        // parser keeps as the hint. Joining on it would mark the subagent live
+        // whenever the parent's process runs.
+        let session = Session(
+            id: "agent-row",
+            source: .claude,
+            startTime: nil,
+            endTime: nil,
+            model: nil,
+            filePath: "/Users/alexm/.claude/projects/proj/90fb4e5c-9eb2-4db8-80ce-30a0728ccf7a/subagents/agent-a1b2.jsonl",
+            eventCount: 0,
+            events: [],
+            cwd: nil,
+            repoName: nil,
+            lightweightTitle: nil,
+            codexInternalSessionIDHint: "90fb4e5c-9eb2-4db8-80ce-30a0728ccf7a",
+            parentSessionID: "90fb4e5c-9eb2-4db8-80ce-30a0728ccf7a",
+            relationshipKind: .subagent
+        )
+
+        let ids = CodexActiveSessionsModel.liveSessionIDCandidates(for: session)
+        XCTAssertFalse(ids.contains("90fb4e5c-9eb2-4db8-80ce-30a0728ccf7a"))
+    }
+
     func testNormalizePath_trimsAndStandardizesPath() {
         let path = "  ~/tmp/./sessions/../rollout.jsonl  "
         let normalized = CodexActiveSessionsModel.normalizePath(path)

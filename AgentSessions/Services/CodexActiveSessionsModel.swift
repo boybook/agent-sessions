@@ -935,7 +935,11 @@ final class CodexActiveSessionsModel {
             appendUnique(session.codexInternalSessionIDHint)
             appendUnique(session.codexFilenameUUID)
         case .claude:
-            appendUnique(session.codexInternalSessionIDHint)
+            // A subagent's transcript carries its parent's session id; joining on it
+            // would mark every subagent live while the parent process runs.
+            if !session.isSubagent {
+                appendUnique(session.codexInternalSessionIDHint)
+            }
             appendUnique(extractSessionID(fromLogPath: session.filePath, source: .claude))
         case .opencode:
             appendUnique(session.id)
@@ -2235,7 +2239,8 @@ final class CodexActiveSessionsModel {
                                                 probeITerm: Bool,
                                                 previousLiveStates: [String: CodexLiveState],
                                                 probedITermPresenceKeys: Set<String>,
-                                                batchProbeResults: [String: ITermProbeResult]) -> LiveStateClassification {
+                                                batchProbeResults: [String: ITermProbeResult],
+                                                tmuxProbeResults: [String: ITermProbeResult] = [:]) -> LiveStateClassification {
         var out: [String: CodexLiveState] = [:]
         var idleOut: [String: HUDIdleReason] = [:]
         out.reserveCapacity(presences.count)
@@ -2250,8 +2255,10 @@ final class CodexActiveSessionsModel {
                 tty: presence.tty,
                 termProgram: presence.terminal?.termProgram
             )
-            let shouldProbeThisPresence = probeEligible && probedITermPresenceKeys.contains(key)
-            let matchedBatchProbe = batchProbeResults[key]
+            // A tmux pane read counts as a probe of this presence, on any terminal.
+            let tmuxProbe = tmuxProbeResults[key]
+            let shouldProbeThisPresence = (probeEligible && probedITermPresenceKeys.contains(key)) || tmuxProbe != nil
+            let matchedBatchProbe = tmuxProbe ?? batchProbeResults[key]
             if let hintedState = presence.liveStateHint {
                 state = hintedState
             } else if shouldProbeThisPresence, presence.source == .codex {
@@ -3270,7 +3277,7 @@ final class CodexActiveSessionsModel {
         }
     }
 
-    nonisolated private static func extractSessionID(fromLogPath path: String, source: SessionSource) -> String? {
+    nonisolated static func extractSessionID(fromLogPath path: String, source: SessionSource) -> String? {
         let base = URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
         switch source {
         case .claude:
@@ -3292,6 +3299,57 @@ final class CodexActiveSessionsModel {
 
     /// Scan the Claude project directory for JSONL session files, sorted newest-first.
     /// Used to infer session log paths when lsof can't find the file open.
+    /// What a running Claude Code process says about itself in
+    /// `<config>/sessions/<pid>.json`: the conversation it is on *now* (it changes
+    /// with /resume and /branch), its folder, and whether it is busy.
+    struct ClaudeProcessRegistryEntry: Equatable, Sendable {
+        let sessionID: String
+        let cwd: String?
+        let liveState: CodexLiveState?
+        let logPath: String?
+    }
+
+    /// Reads the registry entry for `pid` from the first Claude config root that
+    /// has one. `roots` may name a config folder or its `projects` folder.
+    nonisolated static func claudeProcessRegistryEntry(pid: Int, roots: [String]) -> ClaudeProcessRegistryEntry? {
+        var configRoots: [URL] = []
+        for raw in roots where !raw.isEmpty {
+            let url = URL(fileURLWithPath: (raw as NSString).expandingTildeInPath)
+            let config = url.lastPathComponent == "projects" ? url.deletingLastPathComponent() : url
+            if !configRoots.contains(config) { configRoots.append(config) }
+        }
+        for config in configRoots {
+            let file = config.appendingPathComponent("sessions").appendingPathComponent("\(pid).json")
+            guard let data = try? Data(contentsOf: file),
+                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  (object["pid"] as? Int) == pid,
+                  let sessionID = (object["sessionId"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !sessionID.isEmpty else { continue }
+            let cwd = object["cwd"] as? String
+            let liveState: CodexLiveState?
+            switch object["status"] as? String {
+            case "busy", "shell": liveState = .activeWorking
+            case "idle": liveState = .openIdle
+            default: liveState = nil
+            }
+            return ClaudeProcessRegistryEntry(sessionID: sessionID, cwd: cwd, liveState: liveState,
+                                              logPath: cwd.flatMap { claudeSessionLogPath(sessionID: sessionID, cwd: $0, configRoot: config) })
+        }
+        return nil
+    }
+
+    /// `<config>/projects/<folder>/<id>.jsonl`. Claude Code writes the folder with
+    /// every non-alphanumeric character as `-`; older builds replaced only `/`.
+    nonisolated static func claudeSessionLogPath(sessionID: String, cwd: String, configRoot: URL) -> String? {
+        let projects = configRoot.appendingPathComponent("projects")
+        let allDashed = String(cwd.unicodeScalars.map { CharacterSet.alphanumerics.contains($0) && $0.isASCII ? Character($0) : "-" })
+        for folder in [allDashed, cwd.replacingOccurrences(of: "/", with: "-")] {
+            let path = projects.appendingPathComponent(folder).appendingPathComponent("\(sessionID).jsonl").path
+            if FileManager.default.fileExists(atPath: path) { return path }
+        }
+        return nil
+    }
+
     nonisolated static func claudeSessionLogCandidates(cwd: String, claudeRoot: String, recencyCutoff: Date? = nil) -> [(path: String, sessionID: String?)] {
         let encoded = cwd.replacingOccurrences(of: "/", with: "-")
         let projectDir = URL(fileURLWithPath: claudeRoot)

@@ -177,6 +177,7 @@ actor PresenceEngine {
         case processDiscovery
         case iTermInventory
         case iTermBatchProbe
+        case tmuxProbe
     }
 
     // MARK: - Public stream
@@ -1391,7 +1392,22 @@ actor PresenceEngine {
                 presence.sessionId = info.sessionID
                 presence.sessionLogPath = info.sessionLogPath
                 presence.workspaceRoot = info.cwd
-                if presence.sessionLogPath == nil, source == .claude, let cwd = info.cwd {
+                // Claude Code records the conversation each process is on, so a
+                // /resume or /branch is followed exactly instead of guessed from
+                // which log in the folder was written last.
+                let registered = source == .claude
+                    ? CodexActiveSessionsModel.claudeProcessRegistryEntry(pid: info.pid, roots: claudeSessionRoots)
+                    : nil
+                if let registered {
+                    presence.sessionId = registered.sessionID
+                    presence.workspaceRoot = presence.workspaceRoot ?? registered.cwd
+                    presence.liveStateHint = registered.liveState
+                    let openLogMatches = presence.sessionLogPath.map {
+                        CodexActiveSessionsModel.extractSessionID(fromLogPath: $0, source: .claude) == registered.sessionID
+                    } ?? false
+                    if !openLogMatches { presence.sessionLogPath = registered.logPath }
+                    if let logPath = presence.sessionLogPath { assignedLogPaths.insert(logPath) }
+                } else if presence.sessionLogPath == nil, source == .claude, let cwd = info.cwd {
                     let root = claudeSessionRoots.first ?? (NSHomeDirectory() + "/.claude")
                     let candidates = CodexActiveSessionsModel.claudeSessionLogCandidates(cwd: cwd, claudeRoot: root, recencyCutoff: now.addingTimeInterval(-60))
                     if let match = candidates.first(where: { !assignedLogPaths.contains($0.path) }) {
@@ -1461,6 +1477,11 @@ actor PresenceEngine {
             for: probeTargets,
             timeout: timeout
         )
+        // tmux reads are cheap and touch no app, so unlike the iTerm probe they
+        // also run while Agent Sessions is in the background.
+        let tmuxProbeResults = (probeITerm || environment.hasVisibleConsumer)
+            ? await captureTmuxProbeResults(generation: generation, for: presences, timeout: timeout)
+            : [:]
         guard isCurrentRefreshGeneration(generation) else {
             markStaleRefreshDrop()
             return CodexActiveSessionsModel.LiveStateClassification(liveStates: previousLiveStates, idleReasons: [:])
@@ -1474,7 +1495,8 @@ actor PresenceEngine {
             probeITerm: probeITerm,
             previousLiveStates: previousLiveStates,
             probedITermPresenceKeys: probedITermPresenceKeys,
-            batchProbeResults: batchProbeResults
+            batchProbeResults: batchProbeResults,
+            tmuxProbeResults: tmuxProbeResults
         )
 #if DEBUG
         Perf.end(_classifySpan)
@@ -1518,6 +1540,48 @@ actor PresenceEngine {
         )
         itermProbeRoundRobinCursor = selection.nextCursor
         return Set(selection.selected)
+    }
+
+    // MARK: - tmux probe
+
+    /// Screen tails of agents running in tmux panes, keyed by presence. A pane's
+    /// tty is its agent's tty, which no terminal tab owns, so the iTerm probe never
+    /// matches these; tmux reads the pane directly, whatever terminal shows it.
+    private func captureTmuxProbeResults(generation: UInt64,
+                                         for presences: [CodexActivePresence],
+                                         timeout: TimeInterval) async -> [String: CodexActiveSessionsModel.ITermProbeResult] {
+        guard TmuxIntegration.isActive, let tmux = TmuxLocator.path() else { return [:] }
+        var keysByTTY: [String: [String]] = [:]
+        for presence in presences where presence.liveStateHint == nil {
+            guard let tty = TmuxCommand.normalizedTTY(presence.tty) else { continue }
+            let key = CodexActiveSessionsModel.presenceKey(for: presence)
+            guard key != "unknown" else { continue }
+            keysByTTY[tty, default: []].append(key)
+        }
+        guard !keysByTTY.isEmpty else { return [:] }
+        let executable = URL(fileURLWithPath: tmux)
+        guard let listing = await runManagedCommand(kind: .tmuxProbe, generation: generation,
+                                                    executable: executable,
+                                                    arguments: TmuxCommand.listPanesArguments,
+                                                    timeout: timeout) else { return [:] }
+        var keysByPane: [String: [String]] = [:]
+        for pane in TmuxCommand.parsePanes(String(decoding: listing, as: UTF8.self)) {
+            if let tty = TmuxCommand.normalizedTTY(pane.tty), let keys = keysByTTY[tty] {
+                keysByPane[pane.paneID] = keys
+            }
+        }
+        guard !keysByPane.isEmpty else { return [:] }
+        guard let captured = await runManagedCommand(kind: .tmuxProbe, generation: generation,
+                                                     executable: executable,
+                                                     arguments: TmuxCommand.captureArguments(paneIDs: keysByPane.keys.sorted()),
+                                                     timeout: timeout) else { return [:] }
+        var results: [String: CodexActiveSessionsModel.ITermProbeResult] = [:]
+        for (paneID, tail) in TmuxCommand.parseCaptures(String(decoding: captured, as: UTF8.self)) {
+            for key in keysByPane[paneID] ?? [] {
+                results[key] = CodexActiveSessionsModel.ITermProbeResult(tail: tail, isProcessing: nil, isAtShellPrompt: nil)
+            }
+        }
+        return results
     }
 
     // MARK: - iTerm batch probe (ported from captureBatchedITermProbeResults)

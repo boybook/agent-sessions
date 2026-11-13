@@ -8,7 +8,9 @@ enum AgentTerminalLauncher {
     /// How long Warp needs after launch before it will read a tab config.
     private static let warpColdStartSettleNanoseconds: UInt64 = 3_000_000_000
 
-    static func launchInTerminal(shellCommand: String, domain: String = "AgentTerminalLauncher") throws {
+    static func launchInTerminal(shellCommand: String, domain: String = "AgentTerminalLauncher",
+                                 wrapInTmux: Bool = true) throws {
+        let shellCommand = wrapInTmux ? TmuxLaunch.wrapIfEnabled(shellCommand, cwd: nil) : shellCommand
         let scriptLines = [
             "on run argv",
             "set shellCommand to \"\"",
@@ -29,7 +31,9 @@ enum AgentTerminalLauncher {
         try runAppleScript(scriptLines, arguments: [shellCommand], domain: domain, fallbackMessage: "Terminal launch failed.")
     }
 
-    static func launchInITerm(shellCommand: String, domain: String = "AgentTerminalLauncher") throws {
+    static func launchInITerm(shellCommand: String, domain: String = "AgentTerminalLauncher",
+                              wrapInTmux: Bool = true) throws {
+        let shellCommand = wrapInTmux ? TmuxLaunch.wrapIfEnabled(shellCommand, cwd: nil) : shellCommand
         let scriptLines = [
             "on run argv",
             "set shellCommand to \"\"",
@@ -53,7 +57,9 @@ enum AgentTerminalLauncher {
     /// Uses Ghostty's AppleScript dictionary (surface configuration + new window).
     /// The command goes in as initial input rather than as the surface command so
     /// the user's login shell, and with it their PATH, runs first.
-    static func launchInGhostty(shellCommand: String, cwd: String?, domain: String = "AgentTerminalLauncher") async throws {
+    static func launchInGhostty(shellCommand: String, cwd: String?, domain: String = "AgentTerminalLauncher",
+                                wrapInTmux: Bool = true) async throws {
+        let shellCommand = wrapInTmux ? TmuxLaunch.wrapIfEnabled(shellCommand, cwd: cwd) : shellCommand
         guard NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.mitchellh.ghostty") != nil else {
             throw NSError(domain: domain, code: 4,
                 userInfo: [NSLocalizedDescriptionKey: "Ghostty is not installed."])
@@ -63,7 +69,9 @@ enum AgentTerminalLauncher {
     }
 
     /// Opens a new terminal tab in Warp or WarpPreview using a temporary tab config.
-    static func launchInWarp(shellCommand: String, cwd: String?, kind: TerminalKind) async throws {
+    static func launchInWarp(shellCommand: String, cwd: String?, kind: TerminalKind,
+                             wrapInTmux: Bool = true) async throws {
+        let shellCommand = wrapInTmux ? TmuxLaunch.wrapIfEnabled(shellCommand, cwd: cwd) : shellCommand
         let scheme: String
         let tabConfigDir: URL
         switch kind {
@@ -164,6 +172,23 @@ enum AgentTerminalLauncher {
         Task.detached {
             try? await Task.sleep(nanoseconds: 30_000_000_000)
             try? FileManager.default.removeItem(at: configFile)
+        }
+    }
+
+    /// Runs `shellCommand` in the terminal chosen in Settings → General.
+    static func launchInPreferredTerminal(shellCommand: String, cwd: String?, wrapInTmux: Bool = true) async throws {
+        let located = cwd.map { "cd \(ShellQuoting.quote($0)) && \(shellCommand)" } ?? shellCommand
+        switch ResumePreferenceHelpers.resolveTerminalKind() {
+        case .iterm2:
+            try launchInITerm(shellCommand: located, wrapInTmux: wrapInTmux)
+        case .ghostty:
+            try await launchInGhostty(shellCommand: shellCommand, cwd: cwd, wrapInTmux: wrapInTmux)
+        case .warp:
+            try await launchInWarp(shellCommand: shellCommand, cwd: cwd, kind: .warp, wrapInTmux: wrapInTmux)
+        case .warpPreview:
+            try await launchInWarp(shellCommand: shellCommand, cwd: cwd, kind: .warpPreview, wrapInTmux: wrapInTmux)
+        case .terminalApp, .unknown:
+            try launchInTerminal(shellCommand: located, wrapInTmux: wrapInTmux)
         }
     }
 
