@@ -3651,23 +3651,6 @@ struct UnifiedSessionsView: View {
             guard let presence else { return nil }
             return activeCodexSessions.liveState(for: presence)
         }()
-        let rowTextColor: Color = {
-            if isSelected { return .white }
-            return !stripMonochrome ? sourceAccent(session) : .secondary
-        }()
-        let rowDotColor: Color = {
-            if let liveState {
-                switch liveState {
-                case .activeWorking:
-                    return Color(hex: "30d158")
-                case .openIdle:
-                    return effectiveColorScheme == .dark ? Color(hex: "ffb340") : Color(hex: "e08600")
-                }
-            }
-            if isSelected { return .white.opacity(0.95) }
-            return !stripMonochrome ? sourceAccent(session) : .primary
-        }()
-        let liveOpacity: Double = liveState == .openIdle ? 0.60 : 1.0
         // Static part precomputed once per rows rebuild (SessionRowsBuilder.build);
         // only the live Claude Desktop archived bit is patched in here. Falls back
         // to the full per-call computation if the row hasn't been through a rebuild
@@ -3680,44 +3663,64 @@ struct UnifiedSessionsView: View {
         )
         label = session.source.descriptor.shortLabel
         let isSubagentRow = (hierarchyRowMeta[session.id]?.depth ?? 0) > 0
-        return HStack(spacing: 6) {
-            if isSubagentRow {
-                Spacer().frame(width: 12)
-            }
-            if let liveState {
-                CodexLiveStatusDot(
-                    state: liveState,
-                    color: rowDotColor,
-                    size: 7,
-                    lastSeenAt: presence?.lastSeenAt
-                )
-                    .accessibilityLabel(Text("\(label) \(liveState == .activeWorking ? "active" : "open") session"))
-            }
-            Text(label)
-                .font(.system(size: 12, weight: isSubagentRow ? .light : .regular))
-                .foregroundStyle(isSubagentRow ? rowTextColor.opacity(0.7) : rowTextColor)
-            ForEach(surfacePills, id: \.identity) { surfacePill in
-                Text(surfacePill.label)
-                    .font(surfacePill.font)
-                    // Never truncate the pill itself: it is a 3-6 character token
-                    // whose whole value is being readable at a glance. Subagent
-                    // rows spend 12pt on their indent, which is enough to clip a
-                    // 6-character label like "cowork" into "cowo…".
-                    .fixedSize()
-                    .padding(.horizontal, 4)
-                    .padding(.vertical, 1)
-                    .background(surfacePill.fill)
-                    .foregroundStyle(surfacePill.foreground(isSelected: isSelected))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 3)
-                            .stroke(surfacePill.stroke(isSelected: isSelected), lineWidth: surfacePill.strokeWidth)
+        // White text only on the accent-colored selection. When the window is not
+        // key the selection turns light gray, and white on it is unreadable.
+        return SelectionProminenceReader { prominent in
+            let onAccent = isSelected && prominent
+            let rowTextColor: Color = {
+                if onAccent { return .white }
+                return !stripMonochrome ? sourceAccent(session) : .secondary
+            }()
+            let rowDotColor: Color = {
+                if let liveState {
+                    switch liveState {
+                    case .activeWorking:
+                        return Color(hex: "30d158")
+                    case .openIdle:
+                        return effectiveColorScheme == .dark ? Color(hex: "ffb340") : Color(hex: "e08600")
+                    }
+                }
+                if onAccent { return .white.opacity(0.95) }
+                return !stripMonochrome ? sourceAccent(session) : .primary
+            }()
+            HStack(spacing: 6) {
+                if isSubagentRow {
+                    Spacer().frame(width: 12)
+                }
+                if let liveState {
+                    CodexLiveStatusDot(
+                        state: liveState,
+                        color: rowDotColor,
+                        size: 7,
+                        lastSeenAt: presence?.lastSeenAt
                     )
-                    .clipShape(RoundedRectangle(cornerRadius: 3))
-                    .accessibilityLabel(surfacePill.accessibilityLabel(agentLabel: label))
+                        .accessibilityLabel(Text("\(label) \(liveState == .activeWorking ? "active" : "open") session"))
+                }
+                Text(label)
+                    .font(.system(size: 12, weight: isSubagentRow ? .light : .regular))
+                    .foregroundStyle(isSubagentRow ? rowTextColor.opacity(0.7) : rowTextColor)
+                ForEach(surfacePills, id: \.identity) { surfacePill in
+                    Text(surfacePill.label)
+                        .font(surfacePill.font)
+                        // Never truncate the pill itself: it is a 3-6 character token
+                        // whose whole value is being readable at a glance. Subagent
+                        // rows spend 12pt on their indent, which is enough to clip a
+                        // 6-character label like "cowork" into "cowo…".
+                        .fixedSize()
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(surfacePill.fill)
+                        .foregroundStyle(surfacePill.foreground(isSelected: onAccent))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 3)
+                                .stroke(surfacePill.stroke(isSelected: onAccent), lineWidth: surfacePill.strokeWidth)
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: 3))
+                        .accessibilityLabel(surfacePill.accessibilityLabel(agentLabel: label))
+                }
+                Spacer(minLength: 4)
             }
-            Spacer(minLength: 4)
         }
-        .opacity(liveOpacity)
         // Keyed on the live state alone: a session-id key re-created the whole cell
         // each time the table reused it for another row while scrolling.
         .id(Self.livePresenceSignature(state: liveState, lastSeenAt: presence?.lastSeenAt))
@@ -5180,6 +5183,14 @@ private struct HoverTrackingIf: ViewModifier {
             content
         }
     }
+}
+
+/// Reports whether the enclosing table row draws an emphasized (accent-colored)
+/// selection, i.e. the row is selected and its window is key.
+private struct SelectionProminenceReader<Content: View>: View {
+    @Environment(\.backgroundProminence) private var prominence
+    @ViewBuilder let content: (Bool) -> Content
+    var body: some View { content(prominence == .increased) }
 }
 
 // Stable cell to prevent Table reuse glitches in Project column
